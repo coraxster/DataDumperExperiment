@@ -1,13 +1,13 @@
 package rabbit
 
 import (
+	"../config"
 	"errors"
 	"fmt"
 	"github.com/streadway/amqp"
 	"log"
 	"sync"
 	"time"
-	"tmp/DataDumper/config"
 )
 
 type Connector struct {

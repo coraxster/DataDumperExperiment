@@ -1,6 +1,8 @@
 package main
 
 import (
+	"./config"
+	"./rabbit"
 	"flag"
 	"io/ioutil"
 	"log"
@@ -8,8 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"time"
-	"tmp/DataDumper/config"
-	"tmp/DataDumper/rabbit"
 )
 
 type Job struct {
