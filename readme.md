@@ -1,5 +1,7 @@
 ##Data dumper go exp
 
+also check branch "simple"
+
 ###build
 ```bash
 GIT_COMMIT=$(git rev-list -1 HEAD) && go build -ldflags "-X main.version=$GIT_COMMIT" -o DDumper main.go
