@@ -1,0 +1,23 @@
+{
+  "rabbit": {
+    "host" : "127.0.0.1",
+    "port" : "5672",
+    "user" : "user",
+    "pass" : "password",
+    "wait-ack" : false
+  },
+  "tasks" : [
+    {
+      "in-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/1in",
+      "out-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/1out",
+      "err-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/1err",
+      "queue" : "topicName1"
+    },
+    {
+      "in-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/2in",
+      "out-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/2out",
+      "err-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/2err",
+      "queue" : "topicName2"
+    }
+  ]
+}
