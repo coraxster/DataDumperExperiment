@@ -20,6 +20,7 @@ type Connector struct {
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
+	log.Printf("Connecting to Rabbit: %s:%v \n", conf.Host, conf.Port)
 	url := fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port)
 	connection, err := amqp.Dial(url)
 	if err != nil {
