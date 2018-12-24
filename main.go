@@ -46,10 +46,12 @@ func main() {
 	signal.Notify(exit, os.Interrupt)
 
 	ticker := time.Tick(time.Second)
+fl:
 	for {
 		select {
 		case <-exit:
 			log.Println("See ya!")
+			break fl
 		case <-ticker:
 			for _, t := range conf.Tasks {
 				task := t
