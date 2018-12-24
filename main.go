@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"github.com/juju/fslock"
 	"io/ioutil"
 	"log"
 	"os"
@@ -15,7 +14,6 @@ import (
 
 type Job struct {
 	Path string
-	L    *fslock.Lock
 	T    *config.Task
 }
 
@@ -63,7 +61,6 @@ func main() {
 					path := t.InDir + string(os.PathSeparator) + f.Name()
 					j := &Job{
 						path,
-						fslock.New(path),
 						&task,
 					}
 
