@@ -83,6 +83,12 @@ func (j *Job) process() {
 	stat, err := f.Stat()
 	if err != nil {
 		log.Println("File getting info failed.", err.Error())
+		err = f.Close()
+		if err != nil {
+			log.Println("File close failed.", err.Error())
+			return
+		}
+		moveFailed(j)
 		return
 	}
 
@@ -91,18 +97,17 @@ func (j *Job) process() {
 
 	err = rabbitConn.Publish(j.T.Queue, b)
 
+	err = f.Close()
+	if err != nil {
+		log.Println("File close failed.", err.Error())
+		return
+	}
 	if err == nil {
 		log.Println("File processed. " + j.Path)
 		moveSuccess(j)
 	} else {
 		log.Println("Send to rabbit failed. ", err.Error())
 		moveFailed(j)
-	}
-
-	err = f.Close()
-	if err != nil {
-		log.Println("File close failed.", err.Error())
-		return
 	}
 }
 
