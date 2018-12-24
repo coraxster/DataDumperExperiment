@@ -125,26 +125,40 @@ func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 			sDone <- j
 			continue
 		}
+
 		b, err := ioutil.ReadFile(j.Path)
 		if err != nil {
 			log.Println("File read failed.", err.Error())
+			moveFailed(j)
 			sDone <- j
 			continue
 		}
 
-		newPath := j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
 		err = rabbitConn.Publish(j.T.Queue, b)
-		if err != nil {
+		if err == nil {
+			log.Println("File processed. " + j.Path)
+			moveSuccess(j)
+			sDone <- j
+		} else {
 			log.Println("Send to rabbit failed. ", err.Error())
-			newPath = j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
+			moveFailed(j)
+			sDone <- j
 		}
+	}
+}
 
-		err = os.Rename(j.Path, newPath)
-		if err != nil {
-			log.Println("File move failed. ", err.Error())
-		}
+func moveSuccess(j *Job) {
+	newPath := j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
+	err := os.Rename(j.Path, newPath)
+	if err != nil {
+		log.Println("File move failed. ", err.Error())
+	}
+}
 
-		log.Println("File processed. " + j.Path)
-		sDone <- j
+func moveFailed(j *Job) {
+	newPath := j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
+	err := os.Rename(j.Path, newPath)
+	if err != nil {
+		log.Println("File move failed. ", err.Error())
 	}
 }
