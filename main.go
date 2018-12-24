@@ -4,7 +4,6 @@ import (
 	"./config"
 	"./rabbit"
 	"flag"
-	"github.com/juju/fslock"
 	"io/ioutil"
 	"log"
 	"os"
@@ -15,8 +14,8 @@ import (
 
 type Job struct {
 	Path string
-	L    *fslock.Lock
 	T    *config.Task
+	F    *os.File
 }
 
 var rabbitConn *rabbit.Connector
@@ -82,8 +81,8 @@ func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, sDone <-ch
 					path := t.InDir + string(os.PathSeparator) + f.Name()
 					s1 <- &Job{
 						path,
-						fslock.New(path),
 						&task,
+						nil,
 					}
 					<-sDone
 				}
@@ -98,10 +97,11 @@ func stage2(s2 chan<- *Job, s1 <-chan *Job, sDone chan<- *Job) {
 	s2Done := make(chan bool)
 	for i := 10; i > 0; i-- {
 		go func() {
+			var err error
 			for j := range s1 {
-				er := j.L.LockWithTimeout(5 * time.Second)
-				if er != nil {
-					log.Println("Error with locking file: " + j.Path)
+				j.F, err = os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
+				if err != nil {
+					log.Println("File open failed.", err.Error())
 					sDone <- j
 					continue
 				}
@@ -122,13 +122,25 @@ func stage2(s2 chan<- *Job, s1 <-chan *Job, sDone chan<- *Job) {
 func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 	for j := range s2 {
 		log.Println("Sending file: " + j.Path)
-		if err := j.L.Unlock(); err != nil { // looks like windows is not able to read from locked file :(
-			log.Println("File unlock failed.", err.Error())
+
+		stat, err := j.F.Stat()
+		if err != nil {
+			log.Println("File getting info failed.", err.Error())
+			moveFailed(j)
 			sDone <- j
 			continue
 		}
 
-		b, err := ioutil.ReadFile(j.Path)
+		if stat.Size() == 0 {
+			log.Println("Got empty file.")
+			moveSuccess(j)
+			sDone <- j
+			continue
+		}
+
+		b := make([]byte, stat.Size())
+		_, err = j.F.Read(b)
+
 		if err != nil {
 			log.Println("File read failed.", err.Error())
 			moveFailed(j)
@@ -136,8 +148,7 @@ func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 			continue
 		}
 
-		err = rabbitConn.Publish(j.T.Queue, b)
-		if err == nil {
+		if err = rabbitConn.Publish(j.T.Queue, b); err == nil {
 			log.Println("File processed. " + j.Path)
 			moveSuccess(j)
 		} else {
@@ -149,16 +160,26 @@ func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 }
 
 func moveSuccess(j *Job) {
+	err := j.F.Close()
+	if err != nil {
+		log.Println("File close failed.", err.Error())
+		return
+	}
 	newPath := j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
-	err := os.Rename(j.Path, newPath)
+	err = os.Rename(j.Path, newPath)
 	if err != nil {
 		log.Println("File move failed. ", err.Error())
 	}
 }
 
 func moveFailed(j *Job) {
+	err := j.F.Close()
+	if err != nil {
+		log.Println("File close failed.", err.Error())
+		return
+	}
 	newPath := j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
-	err := os.Rename(j.Path, newPath)
+	err = os.Rename(j.Path, newPath)
 	if err != nil {
 		log.Println("File move failed. ", err.Error())
 	}
