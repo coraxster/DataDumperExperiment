@@ -1,13 +1,13 @@
 package rabbit
 
 import (
-	"../config"
 	"errors"
 	"fmt"
 	"github.com/streadway/amqp"
 	"log"
 	"sync"
 	"time"
+	"tmp/DataDumper/config"
 )
 
 type Connector struct {
@@ -17,6 +17,70 @@ type Connector struct {
 	ch    *amqp.Channel
 	sync.Mutex
 	waitAck int
+}
+
+func Make(conf config.RabbitConfig) (*Connector, error) {
+	url := fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port)
+	connection, err := amqp.Dial(url)
+	if err != nil {
+		return nil, errors.New("Connect to rabbit failed. " + err.Error())
+	}
+
+	ch, err := connection.Channel()
+	if err != nil {
+		return nil, errors.New("Create rabbit channel failed. " + err.Error())
+	}
+
+	rabbitConn := &Connector{
+		url,
+		connection,
+		make(chan *amqp.Error),
+		ch,
+		sync.Mutex{},
+		conf.WaitAck,
+	}
+
+	log.Println("Rabbit connected.")
+	rabbitConn.con.NotifyClose(rabbitConn.close)
+
+	go rabbitConn.support()
+
+	return rabbitConn, nil
+}
+
+func (connector *Connector) support() {
+	var err error
+	for {
+		lost := <-connector.close
+		connector.Lock()
+		log.Println("Connection failed. Error: ", lost.Error())
+		log.Println("Try to reconnect.")
+		for tries := 1; ; tries++ {
+			power := time.Duration(1)
+			if tries < 20 {
+				power = time.Duration(tries)
+			}
+			connector.con, err = amqp.Dial(connector.uri)
+			if err != nil {
+				log.Printf("Rabbit(%v) reconnect failed. Error: %s", tries, err.Error())
+				time.Sleep(500 * power * time.Millisecond)
+				continue
+			}
+			connector.ch, err = connector.con.Channel()
+			if err != nil {
+				_ = connector.con.Close()
+				log.Fatal("Create rabbit channel failed. ", err.Error())
+				time.Sleep(500 * power * time.Millisecond)
+				continue
+			}
+			log.Println("Rabbit connected.")
+			tries = 0
+			connector.close = make(chan *amqp.Error)
+			connector.con.NotifyClose(connector.close)
+			connector.Unlock()
+			break
+		}
+	}
 }
 
 func (connector *Connector) SeedQueues(queues []string) error {
@@ -102,68 +166,4 @@ func (connector *Connector) Consume(ch chan amqp.Delivery, queue string) error {
 		}
 	}()
 	return nil
-}
-
-func Make(conf config.RabbitConfig) (*Connector, error) {
-	url := fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port)
-	connection, err := amqp.Dial(url)
-	if err != nil {
-		return nil, errors.New("Connect to rabbit failed. " + err.Error())
-	}
-
-	ch, err := connection.Channel()
-	if err != nil {
-		return nil, errors.New("Create rabbit channel failed. " + err.Error())
-	}
-
-	rabbitConn := &Connector{
-		url,
-		connection,
-		make(chan *amqp.Error),
-		ch,
-		sync.Mutex{},
-		conf.WaitAck,
-	}
-
-	log.Println("Rabbit connected.")
-	rabbitConn.con.NotifyClose(rabbitConn.close)
-
-	go rabbitConn.support()
-
-	return rabbitConn, nil
-}
-
-func (connector *Connector) support() {
-	var err error
-	for {
-		lost := <-connector.close
-		connector.Lock()
-		log.Println("Connection failed. Error: ", lost.Error())
-		log.Println("Try to reconnect.")
-		for tries := 1; ; tries++ {
-			power := time.Duration(1)
-			if tries < 20 {
-				power = time.Duration(tries)
-			}
-			connector.con, err = amqp.Dial(connector.uri)
-			if err != nil {
-				log.Printf("Rabbit(%v) reconnect failed. Error: %s", tries, err.Error())
-				time.Sleep(500 * power * time.Millisecond)
-				continue
-			}
-			connector.ch, err = connector.con.Channel()
-			if err != nil {
-				_ = connector.con.Close()
-				log.Fatal("Create rabbit channel failed. ", err.Error())
-				time.Sleep(500 * power * time.Millisecond)
-				continue
-			}
-			log.Println("Rabbit connected.")
-			tries = 0
-			connector.close = make(chan *amqp.Error)
-			connector.con.NotifyClose(connector.close)
-			connector.Unlock()
-			break
-		}
-	}
 }

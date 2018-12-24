@@ -90,6 +90,8 @@ func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, sDone <-ch
 	}
 }
 
+// sometimes we have problems with locking certain files.
+// So lets lock them not blocking concurrently and push further successful
 func stage2(s2 chan<- *Job, s1 <-chan *Job, sDone chan<- *Job) {
 	s2Done := make(chan bool)
 	for i := 10; i > 0; i-- {
@@ -117,9 +119,11 @@ func stage2(s2 chan<- *Job, s1 <-chan *Job, sDone chan<- *Job) {
 
 func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 	for j := range s2 {
-		log.Println("Sending file file: " + j.Path)
-		if err := j.L.Unlock(); err != nil {
+		log.Println("Sending file: " + j.Path)
+		if err := j.L.Unlock(); err != nil { // looks like windows is not able to read from locked file :(
 			log.Println("File unlock failed.", err.Error())
+			sDone <- j
+			continue
 		}
 		b, err := ioutil.ReadFile(j.Path)
 		if err != nil {
@@ -128,17 +132,18 @@ func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 			continue
 		}
 
-		err = rabbitConn.Publish(j.T.Queue, b)
-
 		newPath := j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
+		err = rabbitConn.Publish(j.T.Queue, b)
 		if err != nil {
 			log.Println("Send to rabbit failed. ", err.Error())
 			newPath = j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
 		}
+
 		err = os.Rename(j.Path, newPath)
 		if err != nil {
 			log.Println("File move failed. ", err.Error())
 		}
+
 		log.Println("File processed. " + j.Path)
 		sDone <- j
 	}
