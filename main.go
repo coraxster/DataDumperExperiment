@@ -73,17 +73,19 @@ func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, sDone <-ch
 				files, err := ioutil.ReadDir(t.InDir)
 				if err != nil {
 					log.Println("Error with read dir: " + err.Error())
+					continue
 				}
 				for _, f := range files {
-					path := t.InDir + string(os.PathSeparator) + f.Name()
-					if !f.IsDir() {
-						s1 <- &Job{
-							path,
-							fslock.New(path),
-							&task,
-						}
-						<-sDone
+					if f.IsDir() {
+						continue
 					}
+					path := t.InDir + string(os.PathSeparator) + f.Name()
+					s1 <- &Job{
+						path,
+						fslock.New(path),
+						&task,
+					}
+					<-sDone
 				}
 			}
 		}
