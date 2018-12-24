@@ -19,12 +19,6 @@ type Connector struct {
 	waitAck bool
 }
 
-func (connector *Connector) Channel() *amqp.Channel {
-	connector.Lock()
-	defer connector.Unlock()
-	return connector.ch
-}
-
 func (connector *Connector) SeedQueues(queues []string) error {
 	connector.Lock()
 	defer connector.Unlock()
@@ -49,6 +43,11 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 	connector.Lock()
 	defer connector.Unlock()
 
+	var c chan amqp.Confirmation
+	if connector.waitAck {
+		c = connector.ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+	}
+
 	err := connector.ch.Publish(
 		"",    // exchange
 		queue, // routing key
@@ -62,19 +61,16 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 		return err
 	}
 
-	if !connector.waitAck {
-		return nil
+	if connector.waitAck {
+		log.Println("Waiting for ack.")
+		result := <-c
+		if result.Ack {
+			return nil
+		} else {
+			return errors.New("error with delivery ")
+		}
 	}
-
-	c := make(chan amqp.Confirmation)
-	connector.ch.NotifyPublish(c)
-	log.Println("Waiting for ack.")
-	result := <-c
-	if result.Ack {
-		return nil
-	} else {
-		return errors.New("error with delivery ")
-	}
+	return nil
 }
 
 func (connector *Connector) Consume(ch chan amqp.Delivery, queue string) error {
@@ -83,13 +79,13 @@ func (connector *Connector) Consume(ch chan amqp.Delivery, queue string) error {
 		return err
 	}
 	msgs, err := channel.Consume(
-		queue, // queue
-		"",    // consumer
-		true,  // auto-ack
-		false, // exclusive
-		false, // no-local
-		false, // no-wait
-		nil,   // args
+		queue,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
 	)
 	if err != nil {
 		return err
