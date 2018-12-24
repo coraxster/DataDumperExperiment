@@ -18,7 +18,12 @@ type Job struct {
 	F    *os.File
 }
 
+var version string
 var rabbitConn *rabbit.Connector
+
+func init() {
+	log.Println("Version: ", version)
+}
 
 func main() {
 	confFile := flag.String("config", "config.json", "config json file path")

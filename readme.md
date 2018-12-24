@@ -2,12 +2,12 @@
 
 ###build
 ```bash
-go build -o DDumper main.go
+GIT_COMMIT=$(git rev-list -1 HEAD) && go build -ldflags "-X main.version=$GIT_COMMIT" -o DDumper main.go
 ```
 
 ###build for Windows
 ```bash
-GOOS=windows;GOARCH=386 go build -o DDumper.exe main.go
+GIT_COMMIT=$(git rev-list -1 HEAD) && GOOS=windows;GOARCH=386 go build -o DDumper.exe main.go
 ```
 
 ###lock file using lockfile
