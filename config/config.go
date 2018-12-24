@@ -24,7 +24,7 @@ type RabbitConfig struct {
 	Port    string `json:"port"`
 	User    string `json:"user"`
 	Pass    string `json:"pass"`
-	WaitAck bool   `json:"wait-ack"`
+	WaitAck int    `json:"wait-ack"`
 }
 
 func Load(file string) (*Config, error) {

@@ -16,7 +16,7 @@ type Connector struct {
 	close chan *amqp.Error
 	ch    *amqp.Channel
 	sync.Mutex
-	waitAck bool
+	waitAck int
 }
 
 func (connector *Connector) SeedQueues(queues []string) error {
@@ -44,7 +44,7 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 	defer connector.Unlock()
 
 	var c chan amqp.Confirmation
-	if connector.waitAck {
+	if connector.waitAck > 0 {
 		c = connector.ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 	}
 
@@ -61,13 +61,18 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 		return err
 	}
 
-	if connector.waitAck {
+	if connector.waitAck > 0 {
 		log.Println("Waiting for ack.")
-		result := <-c
-		if result.Ack {
-			return nil
-		} else {
-			return errors.New("error with delivery ")
+		timer := time.After(time.Duration(connector.waitAck) * time.Second)
+		select {
+		case result := <-c:
+			if result.Ack {
+				return nil
+			} else {
+				return errors.New("error with delivery ")
+			}
+		case <-timer:
+			return errors.New("error with delivery, ack timed out ")
 		}
 	}
 	return nil
