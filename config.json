@@ -4,7 +4,7 @@
     "port" : "5672",
     "user" : "user",
     "pass" : "password",
-    "wait-ack" : 5
+    "wait-ack" : 0
   },
   "tasks" : [
     {

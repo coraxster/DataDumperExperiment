@@ -46,7 +46,7 @@ func main() {
 	for {
 		select {
 		case <-exit:
-			log.Println("Buy-buy!")
+			log.Println("See ya!")
 		case <-ticker:
 			for _, t := range conf.Tasks {
 				task := t
@@ -77,23 +77,20 @@ func main() {
 func (j *Job) process() {
 	log.Println("Sending file: " + j.Path)
 
-	er := j.L.TryLock()
-	if er != nil {
-		log.Println("Error with locking file: " + j.Path)
-		return
-	}
-
-	if err := j.L.Unlock(); err != nil { // looks like windows is not able to read from locked file :(
-		log.Println("File unlock failed.", err.Error())
-		return
-	}
-
-	b, err := ioutil.ReadFile(j.Path)
+	f, err := os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
 	if err != nil {
-		log.Println("File read failed.", err.Error())
-		moveFailed(j)
+		log.Println("File open failed.", err.Error())
 		return
 	}
+
+	stat, err := f.Stat()
+	if err != nil {
+		log.Println("File getting info failed.", err.Error())
+		return
+	}
+
+	b := make([]byte, stat.Size())
+	_, err = f.Read(b)
 
 	err = rabbitConn.Publish(j.T.Queue, b)
 
@@ -103,6 +100,12 @@ func (j *Job) process() {
 	} else {
 		log.Println("Send to rabbit failed. ", err.Error())
 		moveFailed(j)
+	}
+
+	err = f.Close()
+	if err != nil {
+		log.Println("File close failed.", err.Error())
+		return
 	}
 }
 
