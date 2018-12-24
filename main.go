@@ -138,12 +138,11 @@ func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 		if err == nil {
 			log.Println("File processed. " + j.Path)
 			moveSuccess(j)
-			sDone <- j
 		} else {
 			log.Println("Send to rabbit failed. ", err.Error())
 			moveFailed(j)
-			sDone <- j
 		}
+		sDone <- j
 	}
 }
 
