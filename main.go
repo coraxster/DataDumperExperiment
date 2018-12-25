@@ -129,6 +129,17 @@ func (j *Job) process() {
 		return
 	}
 
+	if stat.Size() == 0 {
+		err = f.Close()
+		if err != nil {
+			log.Println("File close failed.", err.Error())
+			return
+		}
+		moveSuccess(j)
+		log.Println("Empty file processed. " + j.Path)
+		return
+	}
+
 	b := make([]byte, stat.Size())
 	_, err = f.Read(b)
 
