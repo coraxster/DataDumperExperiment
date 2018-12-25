@@ -53,6 +53,7 @@ fl:
 			log.Println("See ya!")
 			break fl
 		case <-ticker:
+			var jobs []*Job
 			for _, t := range conf.Tasks {
 				task := t
 				files, err := ioutil.ReadDir(t.InDir)
@@ -66,14 +67,40 @@ fl:
 					}
 
 					path := t.InDir + string(os.PathSeparator) + f.Name()
-					j := &Job{
+					jobs = append(jobs, &Job{
 						path,
 						&task,
-					}
-
-					j.process()
+					})
 				}
 			}
+
+			if len(jobs) == 0 {
+				continue
+			}
+
+			inCh := make(chan *Job)
+			doneCh := make(chan bool)
+
+			go func() {
+				for _, j := range jobs {
+					inCh <- j
+				}
+				close(inCh)
+			}()
+
+			for i := 10; i > 0; i-- {
+				go func() {
+					for j := range inCh {
+						j.process()
+					}
+					doneCh <- true
+				}()
+			}
+
+			for i := 10; i > 0; i-- {
+				<-doneCh
+			}
+
 		}
 	}
 }
