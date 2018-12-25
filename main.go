@@ -3,7 +3,9 @@ package main
 import (
 	"./config"
 	"./rabbit"
+	"errors"
 	"flag"
+	"github.com/streadway/amqp"
 	"io/ioutil"
 	"log"
 	"os"
@@ -18,6 +20,7 @@ type Job struct {
 }
 
 var version string
+var conf *config.Config
 var rabbitConn *rabbit.Connector
 
 func init() {
@@ -27,8 +30,8 @@ func init() {
 func main() {
 	confFile := flag.String("config", "config.json", "config json file path")
 	flag.Parse()
-
-	conf, err := config.Load(*confFile)
+	var err error
+	conf, err = config.Load(*confFile)
 	if err != nil {
 		log.Fatal("Config load failed.", err.Error())
 	}
@@ -48,6 +51,7 @@ func main() {
 	ticker := time.Tick(time.Second)
 fl:
 	for {
+
 		select {
 		case <-exit:
 			log.Println("See ya!")
@@ -97,8 +101,26 @@ fl:
 
 			for i := 10; i > 0; i-- {
 				go func() {
-					for j := range inCh {
-						j.process()
+					ch := rabbitConn.Channel()
+					cl := ch.NotifyClose(make(chan *amqp.Error))
+				forLoop:
+					for {
+						select {
+						case j, ok := <-inCh:
+							if !ok {
+								break forLoop
+							}
+							log.Println("Sending file: " + j.Path)
+							err := j.process(ch)
+							if err != nil {
+								log.Println(err.Error())
+								j.moveFailed()
+							} else {
+								j.moveSuccess()
+							}
+						case err = <-cl:
+							ch = rabbitConn.Channel()
+						}
 					}
 					doneCh <- true
 				}()
@@ -113,58 +135,74 @@ fl:
 	}
 }
 
-func (j *Job) process() {
-	log.Println("Sending file: " + j.Path)
-
+func (j *Job) process(ch *amqp.Channel) (err error) {
 	f, err := os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
 	if err != nil {
-		log.Println("File open failed.", err.Error())
-		return
+		return err
 	}
+	defer func() {
+		if fErr := f.Close(); fErr != nil {
+			if err != nil {
+				err = errors.New(err.Error() + fErr.Error())
+			} else {
+				err = fErr
+			}
+		}
+	}()
 
 	stat, err := f.Stat()
 	if err != nil {
-		log.Println("File getting info failed.", err.Error())
-		err = f.Close()
-		if err != nil {
-			log.Println("File close failed.", err.Error())
-			return
-		}
-		moveFailed(j)
+		err = errors.New("File getting info failed. " + err.Error())
 		return
 	}
 
 	if stat.Size() == 0 {
-		err = f.Close()
-		if err != nil {
-			log.Println("File close failed.", err.Error())
-			return
-		}
-		moveSuccess(j)
-		log.Println("Empty file processed. " + j.Path)
 		return
 	}
 
 	b := make([]byte, stat.Size())
 	_, err = f.Read(b)
-
-	err = rabbitConn.Publish(j.T.Queue, b)
-
-	err = f.Close()
 	if err != nil {
-		log.Println("File close failed.", err.Error())
+		err = errors.New("File read failed. " + err.Error())
 		return
 	}
-	if err == nil {
-		log.Println("File processed. " + j.Path)
-		moveSuccess(j)
-	} else {
-		log.Println("Send to rabbit failed. ", err.Error())
-		moveFailed(j)
+
+	var c chan amqp.Confirmation
+	if conf.Rabbit.WaitAck > 0 {
+		c = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 	}
+
+	err = ch.Publish(
+		"",        // exchange
+		j.T.Queue, // routing key
+		true,      // mandatory
+		false,     // immediate
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        b,
+		})
+	if err != nil {
+		return
+	}
+
+	if conf.Rabbit.WaitAck > 0 {
+		log.Println("Waiting for ack.")
+		timer := time.After(time.Duration(conf.Rabbit.WaitAck) * time.Second)
+		select {
+		case result := <-c:
+			if result.Ack {
+				return
+			} else {
+				return errors.New("error with delivery ")
+			}
+		case <-timer:
+			return errors.New("error with delivery, ack timed out ")
+		}
+	}
+	return
 }
 
-func moveSuccess(j *Job) {
+func (j *Job) moveSuccess() {
 	newPath := j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
 	err := os.Rename(j.Path, newPath)
 	if err != nil {
@@ -172,7 +210,7 @@ func moveSuccess(j *Job) {
 	}
 }
 
-func moveFailed(j *Job) {
+func (j *Job) moveFailed() {
 	newPath := j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
 	err := os.Rename(j.Path, newPath)
 	if err != nil {
