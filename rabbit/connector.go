@@ -17,6 +17,7 @@ type Connector struct {
 	ch    *amqp.Channel
 	sync.Mutex
 	waitAck bool
+	ConfCh  chan amqp.Confirmation
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
@@ -31,10 +32,12 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 		return nil, errors.New("Create rabbit channel failed. " + err.Error())
 	}
 
+	var confCh chan amqp.Confirmation
 	if conf.WaitAck {
 		if err = ch.Confirm(false); err != nil {
 			return nil, errors.New("Set ACK confirmation mode failed. " + err.Error())
 		}
+		confCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 	}
 
 	rabbitConn := &Connector{
@@ -44,6 +47,7 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 		ch,
 		sync.Mutex{},
 		conf.WaitAck,
+		confCh,
 	}
 
 	log.Println("Rabbit connected.")
@@ -85,6 +89,7 @@ func (connector *Connector) support() {
 					time.Sleep(500 * power * time.Millisecond)
 					continue
 				}
+				connector.ConfCh = connector.ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 			}
 			log.Println("Rabbit connected.")
 			tries = 0
@@ -120,11 +125,6 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 	connector.Lock()
 	defer connector.Unlock()
 
-	var c chan amqp.Confirmation
-	if connector.waitAck {
-		c = connector.ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-	}
-
 	err := connector.ch.Publish(
 		"",    // exchange
 		queue, // routing key
@@ -140,7 +140,7 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 
 	if connector.waitAck {
 		log.Println("Waiting for ack.")
-		result, ok := <-c
+		result, ok := <-connector.ConfCh
 		if ok && result.Ack {
 			return nil
 		}
