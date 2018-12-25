@@ -102,7 +102,11 @@ fl:
 			for i := 10; i > 0; i-- {
 				go func() {
 					ch := rabbitConn.Channel()
-					cl := ch.NotifyClose(make(chan *amqp.Error))
+					clCh := ch.NotifyClose(make(chan *amqp.Error))
+					var ackCh chan amqp.Confirmation
+					if conf.Rabbit.WaitAck > 0 {
+						ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+					}
 				forLoop:
 					for {
 						select {
@@ -111,14 +115,14 @@ fl:
 								break forLoop
 							}
 							log.Println("Sending file: " + j.Path)
-							err := j.process(ch)
+							err := j.process(ch, ackCh)
 							if err != nil {
 								log.Println(err.Error())
 								j.moveFailed()
 							} else {
 								j.moveSuccess()
 							}
-						case err = <-cl:
+						case err = <-clCh:
 							ch = rabbitConn.Channel()
 						}
 					}
@@ -135,7 +139,7 @@ fl:
 	}
 }
 
-func (j *Job) process(ch *amqp.Channel) (err error) {
+func (j *Job) process(ch *amqp.Channel, ackCh chan amqp.Confirmation) (err error) {
 	f, err := os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
 	if err != nil {
 		return err
@@ -167,11 +171,6 @@ func (j *Job) process(ch *amqp.Channel) (err error) {
 		return
 	}
 
-	var c chan amqp.Confirmation
-	if conf.Rabbit.WaitAck > 0 {
-		c = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-	}
-
 	err = ch.Publish(
 		"",        // exchange
 		j.T.Queue, // routing key
@@ -189,11 +188,11 @@ func (j *Job) process(ch *amqp.Channel) (err error) {
 		log.Println("Waiting for ack.")
 		timer := time.After(time.Duration(conf.Rabbit.WaitAck) * time.Second)
 		select {
-		case result := <-c:
+		case result := <-ackCh:
 			if result.Ack {
 				return
 			} else {
-				return errors.New("error with delivery ")
+				return errors.New("error with delivery, bad ACK ")
 			}
 		case <-timer:
 			return errors.New("error with delivery, ack timed out ")
