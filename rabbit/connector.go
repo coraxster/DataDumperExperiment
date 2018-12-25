@@ -19,31 +19,36 @@ type Connector struct {
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
-	log.Printf("Connecting to Rabbit: %s:%v \n", conf.Host, conf.Port)
-	url := fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port)
-	connection, err := amqp.Dial(url)
-	if err != nil {
-		return nil, errors.New("Connect to rabbit failed. " + err.Error())
-	}
-
 	rabbitConn := &Connector{
-		url,
-		connection,
-		make(chan *amqp.Error),
+		fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port),
+		nil,
+		nil,
 		sync.Mutex{},
 		conf.WaitAck,
 	}
 
+	err := rabbitConn.connect()
+	if err != nil {
+		return nil, err
+	}
 	log.Println("Rabbit connected.")
-	rabbitConn.con.NotifyClose(rabbitConn.close)
 
 	go rabbitConn.support()
 
 	return rabbitConn, nil
 }
 
-func (connector *Connector) support() {
+func (connector *Connector) connect() error {
 	var err error
+	connector.con, err = amqp.Dial(connector.uri)
+	if err != nil {
+		return errors.New("Connect to rabbit failed. " + err.Error())
+	}
+	connector.close = connector.con.NotifyClose(make(chan *amqp.Error))
+	return nil
+}
+
+func (connector *Connector) support() {
 	for {
 		lost := <-connector.close
 		connector.Lock()
@@ -54,9 +59,9 @@ func (connector *Connector) support() {
 			if tries < 20 {
 				power = time.Duration(tries)
 			}
-			connector.con, err = amqp.Dial(connector.uri)
+			err := connector.connect()
 			if err != nil {
-				log.Printf("Rabbit(%v) reconnect failed. Error: %s", tries, err.Error())
+				log.Printf("Rabbit(%v) reconnect failed. Error: %s \n", tries, err.Error())
 				time.Sleep(500 * power * time.Millisecond)
 				continue
 			}
