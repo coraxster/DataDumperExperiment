@@ -31,6 +31,12 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 		return nil, errors.New("Create rabbit channel failed. " + err.Error())
 	}
 
+	if conf.WaitAck > 0 {
+		if err = ch.Confirm(false); err != nil {
+			return nil, errors.New("Set ACK confirmation mode failed. " + err.Error())
+		}
+	}
+
 	rabbitConn := &Connector{
 		url,
 		connection,
@@ -62,16 +68,23 @@ func (connector *Connector) support() {
 			}
 			connector.con, err = amqp.Dial(connector.uri)
 			if err != nil {
-				log.Printf("Rabbit(%v) reconnect failed. Error: %s", tries, err.Error())
+				log.Printf("Rabbit(%v) reconnect failed. Error: %s \n", tries, err.Error())
 				time.Sleep(500 * power * time.Millisecond)
 				continue
 			}
 			connector.ch, err = connector.con.Channel()
 			if err != nil {
 				_ = connector.con.Close()
-				log.Fatal("Create rabbit channel failed. ", err.Error())
+				log.Println("Create rabbit channel failed. ", err.Error())
 				time.Sleep(500 * power * time.Millisecond)
 				continue
+			}
+			if connector.waitAck > 0 {
+				if err = connector.ch.Confirm(false); err != nil {
+					log.Println("Set ACK confirmation mode failed. ", err.Error())
+					time.Sleep(500 * power * time.Millisecond)
+					continue
+				}
 			}
 			log.Println("Rabbit connected.")
 			tries = 0
