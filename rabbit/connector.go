@@ -21,45 +21,50 @@ type Connector struct {
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
-	url := fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port)
-	connection, err := amqp.Dial(url)
-	if err != nil {
-		return nil, errors.New("Connect to rabbit failed. " + err.Error())
-	}
-
-	ch, err := connection.Channel()
-	if err != nil {
-		return nil, errors.New("Create rabbit channel failed. " + err.Error())
-	}
-
-	var confCh chan amqp.Confirmation
-	if conf.WaitAck {
-		if err = ch.Confirm(false); err != nil {
-			return nil, errors.New("Set ACK confirmation mode failed. " + err.Error())
-		}
-		confCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-	}
-
 	rabbitConn := &Connector{
-		url,
-		connection,
-		make(chan *amqp.Error),
-		ch,
+		fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port),
+		nil,
+		nil,
+		nil,
 		sync.Mutex{},
 		conf.WaitAck,
-		confCh,
+		nil,
 	}
 
+	err := rabbitConn.connect()
+	if err != nil {
+		return nil, err
+	}
 	log.Println("Rabbit connected.")
-	rabbitConn.con.NotifyClose(rabbitConn.close)
 
 	go rabbitConn.support()
 
 	return rabbitConn, nil
 }
 
-func (connector *Connector) support() {
+func (connector *Connector) connect() error {
 	var err error
+	connector.con, err = amqp.Dial(connector.uri)
+	if err != nil {
+		return errors.New("Connect to rabbit failed. " + err.Error())
+	}
+
+	connector.ch, err = connector.con.Channel()
+	if err != nil {
+		return errors.New("Create rabbit channel failed. " + err.Error())
+	}
+
+	if connector.waitAck {
+		if err = connector.ch.Confirm(false); err != nil {
+			return errors.New("Set ACK confirmation mode failed. " + err.Error())
+		}
+		connector.ConfCh = connector.ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+	}
+	connector.close = connector.con.NotifyClose(make(chan *amqp.Error))
+	return nil
+}
+
+func (connector *Connector) support() {
 	for {
 		lost := <-connector.close
 		connector.Lock()
@@ -70,26 +75,11 @@ func (connector *Connector) support() {
 			if tries < 20 {
 				power = time.Duration(tries)
 			}
-			connector.con, err = amqp.Dial(connector.uri)
+			err := connector.connect()
 			if err != nil {
 				log.Printf("Rabbit(%v) reconnect failed. Error: %s \n", tries, err.Error())
 				time.Sleep(500 * power * time.Millisecond)
 				continue
-			}
-			connector.ch, err = connector.con.Channel()
-			if err != nil {
-				_ = connector.con.Close()
-				log.Println("Create rabbit channel failed. ", err.Error())
-				time.Sleep(500 * power * time.Millisecond)
-				continue
-			}
-			if connector.waitAck {
-				if err = connector.ch.Confirm(false); err != nil {
-					log.Println("Set ACK confirmation mode failed. ", err.Error())
-					time.Sleep(500 * power * time.Millisecond)
-					continue
-				}
-				connector.ConfCh = connector.ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 			}
 			log.Println("Rabbit connected.")
 			tries = 0
