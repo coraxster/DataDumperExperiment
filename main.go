@@ -53,6 +53,8 @@ fl:
 			log.Println("See ya!")
 			break fl
 		case <-ticker:
+			start := time.Now()
+
 			var jobs []*Job
 			for _, t := range conf.Tasks {
 				task := t
@@ -100,7 +102,8 @@ fl:
 			for i := 10; i > 0; i-- {
 				<-doneCh
 			}
-
+			elapsed := time.Since(start)
+			log.Printf("Dirs walk took %s", elapsed)
 		}
 	}
 }
