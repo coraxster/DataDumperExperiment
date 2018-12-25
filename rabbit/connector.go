@@ -15,6 +15,7 @@ type Connector struct {
 	con   *amqp.Connection
 	close chan *amqp.Error
 	sync.Mutex
+	waitAck int
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
@@ -30,6 +31,7 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 		connection,
 		make(chan *amqp.Error),
 		sync.Mutex{},
+		conf.WaitAck,
 	}
 
 	log.Println("Rabbit connected.")
@@ -74,11 +76,21 @@ func (connector *Connector) Channel() *amqp.Channel {
 
 	for {
 		ch, err := connector.con.Channel()
-		if err == nil {
-			return ch
+		if err != nil {
+			log.Println("rabbit channel create failed:", err.Error())
+			time.Sleep(5 * time.Second)
+			continue
 		}
-		log.Println("rabbit channel create failed:", err.Error())
-		time.Sleep(5 * time.Second)
+
+		if connector.waitAck > 0 {
+			err = ch.Confirm(false)
+			if err != nil {
+				log.Println("rabbit apply ack mode failed:", err.Error())
+				time.Sleep(5 * time.Second)
+				continue
+			}
+		}
+		return ch
 	}
 }
 
