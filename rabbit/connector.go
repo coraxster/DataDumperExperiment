@@ -16,7 +16,7 @@ type Connector struct {
 	close chan *amqp.Error
 	ch    *amqp.Channel
 	sync.Mutex
-	waitAck int
+	waitAck bool
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
@@ -31,7 +31,7 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 		return nil, errors.New("Create rabbit channel failed. " + err.Error())
 	}
 
-	if conf.WaitAck > 0 {
+	if conf.WaitAck {
 		if err = ch.Confirm(false); err != nil {
 			return nil, errors.New("Set ACK confirmation mode failed. " + err.Error())
 		}
@@ -79,7 +79,7 @@ func (connector *Connector) support() {
 				time.Sleep(500 * power * time.Millisecond)
 				continue
 			}
-			if connector.waitAck > 0 {
+			if connector.waitAck {
 				if err = connector.ch.Confirm(false); err != nil {
 					log.Println("Set ACK confirmation mode failed. ", err.Error())
 					time.Sleep(500 * power * time.Millisecond)
@@ -121,7 +121,7 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 	defer connector.Unlock()
 
 	var c chan amqp.Confirmation
-	if connector.waitAck > 0 {
+	if connector.waitAck {
 		c = connector.ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 	}
 
@@ -138,19 +138,13 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 		return err
 	}
 
-	if connector.waitAck > 0 {
+	if connector.waitAck {
 		log.Println("Waiting for ack.")
-		timer := time.After(time.Duration(connector.waitAck) * time.Second)
-		select {
-		case result := <-c:
-			if result.Ack {
-				return nil
-			} else {
-				return errors.New("error with delivery ")
-			}
-		case <-timer:
-			return errors.New("error with delivery, ack timed out ")
+		result, ok := <-c
+		if ok && result.Ack {
+			return nil
 		}
+		return errors.New("error with delivery ")
 	}
 	return nil
 }

@@ -4,7 +4,7 @@
     "port" : "5672",
     "user" : "user",
     "pass" : "password",
-    "wait-ack" : 0
+    "wait-ack" : true
   },
   "tasks" : [
     {
@@ -14,9 +14,9 @@
       "queue" : "topicName1"
     },
     {
-      "in-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/2in",
-      "out-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/2out",
-      "err-dir" : "/Users/dmitry.kuzmin/dev/go/src/tmp/DataDumper/data/2err",
+      "in-dir" : "/Users/dmitry.kuzmin/Desktop/2in",
+      "out-dir" : "/Users/dmitry.kuzmin/Desktop/2out",
+      "err-dir" : "/Users/dmitry.kuzmin/Desktop/2err",
       "queue" : "topicName2"
     }
   ]
