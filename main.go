@@ -104,7 +104,7 @@ fl:
 					ch := rabbitConn.Channel()
 					clCh := ch.NotifyClose(make(chan *amqp.Error))
 					var ackCh chan amqp.Confirmation
-					if conf.Rabbit.WaitAck > 0 {
+					if conf.Rabbit.WaitAck {
 						ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 					}
 				forLoop:
@@ -184,19 +184,13 @@ func (j *Job) process(ch *amqp.Channel, ackCh chan amqp.Confirmation) (err error
 		return
 	}
 
-	if conf.Rabbit.WaitAck > 0 {
+	if conf.Rabbit.WaitAck {
 		log.Println("Waiting for ack.")
-		timer := time.After(time.Duration(conf.Rabbit.WaitAck) * time.Second)
-		select {
-		case result := <-ackCh:
-			if result.Ack {
-				return
-			} else {
-				return errors.New("error with delivery, bad ACK ")
-			}
-		case <-timer:
-			return errors.New("error with delivery, ack timed out ")
+		result, ok := <-ackCh
+		if ok && result.Ack {
+			return
 		}
+		return errors.New("error with delivery ")
 	}
 	return
 }

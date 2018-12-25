@@ -15,7 +15,7 @@ type Connector struct {
 	con   *amqp.Connection
 	close chan *amqp.Error
 	sync.Mutex
-	waitAck int
+	waitAck bool
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
@@ -82,7 +82,7 @@ func (connector *Connector) Channel() *amqp.Channel {
 			continue
 		}
 
-		if connector.waitAck > 0 {
+		if connector.waitAck {
 			err = ch.Confirm(false)
 			if err != nil {
 				log.Println("rabbit apply ack mode failed:", err.Error())
