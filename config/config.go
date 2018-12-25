@@ -78,7 +78,7 @@ func checkDir(s string) error {
 		if err != nil {
 			return errors.New("create dir failed: " + err.Error())
 		}
-		err = nil
+		info, err = os.Stat(s)
 	}
 
 	if err != nil {
