@@ -82,6 +82,7 @@ fl:
 			if len(jobs) == 0 {
 				continue
 			}
+			log.Printf("Got %v jobs: ", len(jobs))
 			multiProcess(jobs)
 			elapsed := time.Since(start)
 			log.Printf("Dirs walk took %s", elapsed)
@@ -95,53 +96,24 @@ fl:
 // что бы отловить кейсы, когда os тупит и долго принимает решение о локе
 //
 func multiProcess(jobs []*Job) {
+	chunks := split(jobs, 50)
+
 	workersCount := MaxParallel
-	if len(jobs) < workersCount*3 {
-		workersCount = 1
+	if workersCount > len(chunks) {
+		workersCount = len(chunks)
 	}
-	inCh := make(chan *Job)
+	inCh := make(chan []*Job)
 	doneCh := make(chan bool)
 	go func() {
-		for _, j := range jobs {
-			inCh <- j
+		for _, chunk := range chunks {
+			inCh <- chunk
 		}
 		close(inCh)
 	}()
 	for i := workersCount; i > 0; i-- {
 		go func() {
-			var err error
-			ch := rabbitConn.Channel()
-			clCh := ch.NotifyClose(make(chan *amqp.Error))
-			var ackCh chan amqp.Confirmation
-			if conf.Rabbit.WaitAck {
-				ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-			}
-		forLoop:
-			for {
-				select {
-				case j, ok := <-inCh:
-					if !ok {
-						break forLoop
-					}
-					log.Println("Sending file: " + j.Path)
-					err = j.process(ch, ackCh)
-					if err != nil {
-						log.Println(err.Error())
-						j.moveFailed()
-					} else {
-						j.moveSuccess()
-					}
-				case err = <-clCh:
-					ch = rabbitConn.Channel()
-					clCh = ch.NotifyClose(make(chan *amqp.Error))
-					if conf.Rabbit.WaitAck {
-						ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-					}
-				}
-			}
-			err = ch.Close()
-			if err != nil {
-				log.Printf("Channel close error %s", err.Error())
+			for chunk := range inCh {
+				processChunk(chunk)
 			}
 			doneCh <- true
 		}()
@@ -151,7 +123,67 @@ func multiProcess(jobs []*Job) {
 	}
 }
 
-func (j *Job) process(ch *amqp.Channel, ackCh chan amqp.Confirmation) (err error) {
+func split(jobs []*Job, lim int) [][]*Job {
+	var chunk []*Job
+	chunks := make([][]*Job, 0, len(jobs)/lim+1)
+	for len(jobs) >= lim {
+		chunk, jobs = jobs[:lim], jobs[lim:]
+		chunks = append(chunks, chunk)
+	}
+	if len(jobs) > 0 {
+		chunks = append(chunks, jobs[:])
+	}
+	return chunks
+}
+
+func processChunk(jobs []*Job) {
+	ch := rabbitConn.Channel()
+	defer func() {
+		err := ch.Close()
+		if err != nil {
+			log.Printf("Channel close error %s", err.Error())
+		}
+	}()
+
+	closeCh := ch.NotifyClose(make(chan *amqp.Error, 1))
+	var ackCh chan amqp.Confirmation
+	if conf.Rabbit.WaitAck {
+		ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, len(jobs)))
+	}
+
+	sentJobs := make([]*Job, 0, len(jobs))
+	for _, j := range jobs {
+		err := j.process(ch)
+		if err != nil {
+			log.Println(err.Error())
+			j.moveFailed()
+		} else {
+			sentJobs = append(sentJobs, j)
+		}
+	}
+
+	if conf.Rabbit.WaitAck {
+		for range sentJobs {
+			select {
+			case result, ok := <-ackCh:
+				if !ok { // looks like channel closed
+					log.Println("channel closed. ")
+					return
+				}
+				if result.Ack {
+					sentJobs[result.DeliveryTag-1].moveSuccess()
+				} else {
+					sentJobs[result.DeliveryTag-1].moveFailed()
+				}
+			case err := <-closeCh: // looks like channel closed
+				log.Println("channel closed. " + err.Error())
+				return
+			}
+		}
+	}
+}
+
+func (j *Job) process(ch *amqp.Channel) (err error) {
 	f, err := os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
 	if err != nil {
 		return err
@@ -182,7 +214,6 @@ func (j *Job) process(ch *amqp.Channel, ackCh chan amqp.Confirmation) (err error
 		err = errors.New("File read failed. " + err.Error())
 		return
 	}
-
 	err = ch.Publish(
 		"",        // exchange
 		j.T.Queue, // routing key
@@ -192,18 +223,6 @@ func (j *Job) process(ch *amqp.Channel, ackCh chan amqp.Confirmation) (err error
 			ContentType: "text/plain",
 			Body:        b,
 		})
-	if err != nil {
-		return
-	}
-
-	if conf.Rabbit.WaitAck {
-		log.Println("Waiting for ack.")
-		result, ok := <-ackCh
-		if ok && result.Ack {
-			return
-		}
-		return errors.New("error with delivery ")
-	}
 	return
 }
 

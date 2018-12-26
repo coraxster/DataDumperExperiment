@@ -51,8 +51,8 @@ func (connector *Connector) connect() error {
 func (connector *Connector) support() {
 	for {
 		lost := <-connector.close
-		connector.Lock()
 		log.Println("Connection failed. Error: ", lost.Error())
+		connector.Lock()
 		log.Println("Try to reconnect.")
 		for tries := 1; ; tries++ {
 			power := time.Duration(1)
@@ -73,11 +73,10 @@ func (connector *Connector) support() {
 }
 
 func (connector *Connector) Channel() *amqp.Channel {
-	connector.Lock()
-	defer connector.Unlock()
-
 	for {
+		connector.Lock()
 		ch, err := connector.con.Channel()
+		connector.Unlock()
 		if err != nil {
 			log.Println("rabbit channel create failed:", err.Error())
 			time.Sleep(5 * time.Second)
@@ -115,9 +114,7 @@ func (connector *Connector) SeedQueues(queues []string) error {
 }
 
 func (connector *Connector) Consume(ch chan amqp.Delivery, queue string) error {
-	channel := connector.Channel()
-
-	msgs, err := channel.Consume(
+	msgs, err := connector.Channel().Consume(
 		queue,
 		"",
 		false,
