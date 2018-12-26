@@ -23,6 +23,8 @@ var version string
 var conf *config.Config
 var rabbitConn *rabbit.Connector
 
+const MaxParallel = 10
+
 func init() {
 	log.Println("Version: ", version)
 }
@@ -51,14 +53,12 @@ func main() {
 	ticker := time.Tick(time.Second)
 fl:
 	for {
-
 		select {
 		case <-exit:
 			log.Println("See ya!")
 			break fl
 		case <-ticker:
 			start := time.Now()
-
 			var jobs []*Job
 			for _, t := range conf.Tasks {
 				task := t
@@ -79,63 +79,75 @@ fl:
 					})
 				}
 			}
-
 			if len(jobs) == 0 {
 				continue
 			}
-
-			// тупо запараллелим процессинг, работает чуть быстрее, но убивает дисковый io
-			// поэтому наверно не вариант
-			// если параллелить, то несильно и именно открытие файла,
-			// что бы отловить кейсы, когда os тупит и долго принимает решение о локе
-
-			inCh := make(chan *Job)
-			doneCh := make(chan bool)
-
-			go func() {
-				for _, j := range jobs {
-					inCh <- j
-				}
-				close(inCh)
-			}()
-
-			for i := 10; i > 0; i-- {
-				go func() {
-					ch := rabbitConn.Channel()
-					clCh := ch.NotifyClose(make(chan *amqp.Error))
-					var ackCh chan amqp.Confirmation
-					if conf.Rabbit.WaitAck {
-						ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-					}
-				forLoop:
-					for {
-						select {
-						case j, ok := <-inCh:
-							if !ok {
-								break forLoop
-							}
-							log.Println("Sending file: " + j.Path)
-							err := j.process(ch, ackCh)
-							if err != nil {
-								log.Println(err.Error())
-								j.moveFailed()
-							} else {
-								j.moveSuccess()
-							}
-						case err = <-clCh:
-							ch = rabbitConn.Channel()
-						}
-					}
-					doneCh <- true
-				}()
-			}
-
-			for i := 10; i > 0; i-- {
-				<-doneCh
-			}
+			multiProcess(jobs)
 			elapsed := time.Since(start)
 			log.Printf("Dirs walk took %s", elapsed)
 		}
+	}
+}
+
+// тупо запараллелим процессинг, работает чуть быстрее, но убивает дисковый io
+// поэтому наверно не вариант
+// если параллелить, то несильно и именно открытие файла,
+// что бы отловить кейсы, когда os тупит и долго принимает решение о локе
+//
+func multiProcess(jobs []*Job) {
+	workersCount := MaxParallel
+	if len(jobs) < workersCount*3 {
+		workersCount = 1
+	}
+	var err error
+	inCh := make(chan *Job)
+	doneCh := make(chan bool)
+	go func() {
+		for _, j := range jobs {
+			inCh <- j
+		}
+		close(inCh)
+	}()
+	for i := workersCount; i > 0; i-- {
+		go func() {
+			ch := rabbitConn.Channel()
+			clCh := ch.NotifyClose(make(chan *amqp.Error))
+			var ackCh chan amqp.Confirmation
+			if conf.Rabbit.WaitAck {
+				ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+			}
+		forLoop:
+			for {
+				select {
+				case j, ok := <-inCh:
+					if !ok {
+						break forLoop
+					}
+					log.Println("Sending file: " + j.Path)
+					err := j.process(ch, ackCh)
+					if err != nil {
+						log.Println(err.Error())
+						j.moveFailed()
+					} else {
+						j.moveSuccess()
+					}
+				case err = <-clCh:
+					ch = rabbitConn.Channel()
+					clCh = ch.NotifyClose(make(chan *amqp.Error))
+					if conf.Rabbit.WaitAck {
+						ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+					}
+				}
+			}
+			err := ch.Close()
+			if err != nil {
+				log.Printf("Channel close error %s", err.Error())
+			}
+			doneCh <- true
+		}()
+	}
+	for i := workersCount; i > 0; i-- {
+		<-doneCh
 	}
 }
 
