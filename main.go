@@ -1,23 +1,16 @@
 package main
 
 import (
-	"./config"
-	"./rabbit"
-	"errors"
 	"flag"
+	"github.com/coraxster/DataDumper/config"
+	"github.com/coraxster/DataDumper/rabbit"
 	"github.com/streadway/amqp"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"time"
 )
-
-type Job struct {
-	Path string
-	T    *config.Task
-}
 
 var version string
 var conf *config.Config
@@ -71,7 +64,6 @@ fl:
 					if f.IsDir() {
 						continue
 					}
-
 					path := t.InDir + string(os.PathSeparator) + f.Name()
 					jobs = append(jobs, &Job{
 						path,
@@ -83,7 +75,7 @@ fl:
 				continue
 			}
 			log.Printf("Got %v jobs: ", len(jobs))
-			multiProcess(jobs)
+			process(jobs)
 			elapsed := time.Since(start)
 			log.Printf("Dirs walk took %s", elapsed)
 		}
@@ -95,7 +87,7 @@ fl:
 // если параллелить, то несильно и именно открытие файла,
 // что бы отловить кейсы, когда os тупит и долго принимает решение о локе
 //
-func multiProcess(jobs []*Job) {
+func process(jobs []*Job) {
 	chunks := split(jobs, 50)
 
 	workersCount := MaxParallel
@@ -123,19 +115,6 @@ func multiProcess(jobs []*Job) {
 	}
 }
 
-func split(jobs []*Job, lim int) [][]*Job {
-	var chunk []*Job
-	chunks := make([][]*Job, 0, len(jobs)/lim+1)
-	for len(jobs) >= lim {
-		chunk, jobs = jobs[:lim], jobs[lim:]
-		chunks = append(chunks, chunk)
-	}
-	if len(jobs) > 0 {
-		chunks = append(chunks, jobs[:])
-	}
-	return chunks
-}
-
 func processChunk(jobs []*Job) {
 	ch := rabbitConn.Channel()
 	defer func() {
@@ -153,11 +132,28 @@ func processChunk(jobs []*Job) {
 
 	sentJobs := make([]*Job, 0, len(jobs))
 	for _, j := range jobs {
-		err := j.process(ch)
+		b, err := j.Bytes()
 		if err != nil {
-			log.Println(err.Error())
-			j.moveFailed()
+			log.Println("File read error: ", err)
+			j.Failed()
+			continue
+		}
+		err = ch.Publish(
+			"",        // exchange
+			j.T.Queue, // routing key
+			true,      // mandatory
+			false,     // immediate
+			amqp.Publishing{
+				ContentType: "text/plain",
+				Body:        b,
+			})
+		if err != nil {
+			log.Println("Send error:", err)
+			j.Failed()
 		} else {
+			if !conf.Rabbit.WaitAck {
+				j.Success()
+			}
 			sentJobs = append(sentJobs, j)
 		}
 	}
@@ -171,73 +167,14 @@ func processChunk(jobs []*Job) {
 					return
 				}
 				if result.Ack {
-					sentJobs[result.DeliveryTag-1].moveSuccess()
+					sentJobs[result.DeliveryTag-1].Success()
 				} else {
-					sentJobs[result.DeliveryTag-1].moveFailed()
+					sentJobs[result.DeliveryTag-1].Failed()
 				}
 			case err := <-closeCh: // looks like channel closed
 				log.Println("channel closed. " + err.Error())
 				return
 			}
 		}
-	}
-}
-
-func (j *Job) process(ch *amqp.Channel) (err error) {
-	f, err := os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if fErr := f.Close(); fErr != nil {
-			if err != nil {
-				err = errors.New(err.Error() + fErr.Error())
-			} else {
-				err = fErr
-			}
-		}
-	}()
-
-	stat, err := f.Stat()
-	if err != nil {
-		err = errors.New("File getting info failed. " + err.Error())
-		return
-	}
-
-	if stat.Size() == 0 {
-		return
-	}
-
-	b := make([]byte, stat.Size())
-	_, err = f.Read(b)
-	if err != nil {
-		err = errors.New("File read failed. " + err.Error())
-		return
-	}
-	err = ch.Publish(
-		"",        // exchange
-		j.T.Queue, // routing key
-		true,      // mandatory
-		false,     // immediate
-		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        b,
-		})
-	return
-}
-
-func (j *Job) moveSuccess() {
-	newPath := j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
-	err := os.Rename(j.Path, newPath)
-	if err != nil {
-		log.Println("File move failed. ", err.Error())
-	}
-}
-
-func (j *Job) moveFailed() {
-	newPath := j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
-	err := os.Rename(j.Path, newPath)
-	if err != nil {
-		log.Println("File move failed. ", err.Error())
 	}
 }

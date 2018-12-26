@@ -1,9 +1,9 @@
 package rabbit
 
 import (
-	"../config"
 	"errors"
 	"fmt"
+	"github.com/coraxster/DataDumper/config"
 	"github.com/streadway/amqp"
 	"log"
 	"sync"
