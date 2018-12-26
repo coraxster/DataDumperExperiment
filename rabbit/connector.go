@@ -67,8 +67,8 @@ func (connector *Connector) connect() error {
 func (connector *Connector) support() {
 	for {
 		lost := <-connector.close
+		log.Println("Connection failed. Error: ", lost)
 		connector.Lock()
-		log.Println("Connection failed. Error: ", lost.Error())
 		log.Println("Try to reconnect.")
 		for tries := 1; ; tries++ {
 			power := time.Duration(1)
@@ -81,10 +81,8 @@ func (connector *Connector) support() {
 				time.Sleep(500 * power * time.Millisecond)
 				continue
 			}
-			log.Println("Rabbit connected.")
-			tries = 0
-			connector.close = make(chan *amqp.Error)
-			connector.con.NotifyClose(connector.close)
+			log.Println("Rabbit reconnected.")
+			connector.close = connector.con.NotifyClose(make(chan *amqp.Error))
 			connector.Unlock()
 			break
 		}

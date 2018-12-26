@@ -72,7 +72,7 @@ func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, sDone <-ch
 			close(s1)
 			return
 		case <-ticker:
-			sentCount := 0
+			inWorkCount := 0
 			for _, t := range conf.Tasks {
 				task := t
 				files, err := ioutil.ReadDir(t.InDir)
@@ -91,17 +91,13 @@ func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, sDone <-ch
 						&task,
 						nil,
 					}:
-						sentCount++
+						inWorkCount++
 					case <-sDone:
-						s1 <- &Job{
-							path,
-							&task,
-							nil,
-						}
+						inWorkCount--
 					}
 				}
 			}
-			for ; sentCount > 0; sentCount-- {
+			for ; inWorkCount > 0; inWorkCount-- {
 				<-sDone
 			}
 		}
