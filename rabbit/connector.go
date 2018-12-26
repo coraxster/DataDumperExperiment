@@ -66,9 +66,7 @@ func (connector *Connector) support() {
 				continue
 			}
 			log.Println("Rabbit connected.")
-			tries = 0
-			connector.close = make(chan *amqp.Error)
-			connector.con.NotifyClose(connector.close)
+			connector.close = connector.con.NotifyClose(make(chan *amqp.Error))
 			connector.Unlock()
 			break
 		}

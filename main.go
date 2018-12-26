@@ -99,7 +99,6 @@ func multiProcess(jobs []*Job) {
 	if len(jobs) < workersCount*3 {
 		workersCount = 1
 	}
-	var err error
 	inCh := make(chan *Job)
 	doneCh := make(chan bool)
 	go func() {
@@ -110,6 +109,7 @@ func multiProcess(jobs []*Job) {
 	}()
 	for i := workersCount; i > 0; i-- {
 		go func() {
+			var err error
 			ch := rabbitConn.Channel()
 			clCh := ch.NotifyClose(make(chan *amqp.Error))
 			var ackCh chan amqp.Confirmation
@@ -124,7 +124,7 @@ func multiProcess(jobs []*Job) {
 						break forLoop
 					}
 					log.Println("Sending file: " + j.Path)
-					err := j.process(ch, ackCh)
+					err = j.process(ch, ackCh)
 					if err != nil {
 						log.Println(err.Error())
 						j.moveFailed()
@@ -139,7 +139,7 @@ func multiProcess(jobs []*Job) {
 					}
 				}
 			}
-			err := ch.Close()
+			err = ch.Close()
 			if err != nil {
 				log.Printf("Channel close error %s", err.Error())
 			}
