@@ -1,4 +1,4 @@
-package main
+package job
 
 import (
 	"errors"
@@ -63,7 +63,7 @@ func (j *Job) Failed() {
 	}
 }
 
-func split(jobs []*Job, lim int) [][]*Job {
+func Split(jobs []*Job, lim int) [][]*Job {
 	var chunk []*Job
 	chunks := make([][]*Job, 0, len(jobs)/lim+1)
 	for len(jobs) >= lim {

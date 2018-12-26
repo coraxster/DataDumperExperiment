@@ -55,9 +55,9 @@ func (connector *Connector) support() {
 		connector.Lock()
 		log.Println("Try to reconnect.")
 		for tries := 1; ; tries++ {
-			power := time.Duration(1)
-			if tries < 20 {
-				power = time.Duration(tries)
+			power := time.Duration(tries)
+			if tries > 30 {
+				power = time.Duration(60)
 			}
 			err := connector.connect()
 			if err != nil {
@@ -101,27 +101,5 @@ func (connector *Connector) SeedQueues(queues []string) error {
 			return errors.New("Open rabbit channel failed. " + err.Error())
 		}
 	}
-	return nil
-}
-
-func (connector *Connector) Consume(ch chan amqp.Delivery, queue string) error {
-	msgs, err := connector.Channel().Consume(
-		queue,
-		"",
-		false,
-		false,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		for d := range msgs {
-			ch <- d
-		}
-	}()
 	return nil
 }
