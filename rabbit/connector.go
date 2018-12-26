@@ -111,8 +111,6 @@ func (connector *Connector) SeedQueues(queues []string) error {
 
 func (connector *Connector) Publish(queue string, data []byte) error {
 	connector.Lock()
-	defer connector.Unlock()
-
 	err := connector.ch.Publish(
 		"",    // exchange
 		queue, // routing key
@@ -122,6 +120,7 @@ func (connector *Connector) Publish(queue string, data []byte) error {
 			ContentType: "text/plain",
 			Body:        data,
 		})
+	connector.Unlock()
 	if err != nil {
 		return err
 	}
