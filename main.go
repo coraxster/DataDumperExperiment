@@ -89,7 +89,6 @@ fl:
 //
 func process(jobs []*Job) {
 	chunks := split(jobs, 50)
-
 	workersCount := MaxParallel
 	if workersCount > len(chunks) {
 		workersCount = len(chunks)
@@ -117,6 +116,13 @@ func process(jobs []*Job) {
 
 func processChunk(jobs []*Job) {
 	ch := rabbitConn.Channel()
+	if conf.Rabbit.WaitAck {
+		err := ch.Confirm(false)
+		if err != nil {
+			log.Println("rabbit apply ack mode failed:", err)
+			return
+		}
+	}
 	defer func() {
 		err := ch.Close()
 		if err != nil {

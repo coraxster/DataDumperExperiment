@@ -82,15 +82,6 @@ func (connector *Connector) Channel() *amqp.Channel {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-
-		if connector.waitAck {
-			err = ch.Confirm(false)
-			if err != nil {
-				log.Println("rabbit apply ack mode failed:", err.Error())
-				time.Sleep(5 * time.Second)
-				continue
-			}
-		}
 		return ch
 	}
 }
