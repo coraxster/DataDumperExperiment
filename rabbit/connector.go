@@ -82,7 +82,6 @@ func (connector *Connector) support() {
 				continue
 			}
 			log.Println("Rabbit reconnected.")
-			connector.close = connector.con.NotifyClose(make(chan *amqp.Error))
 			connector.Unlock()
 			break
 		}
