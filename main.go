@@ -48,14 +48,14 @@ func main() {
 
 	s1 := make(chan *Job, 10)
 	s2 := make(chan *Job)
-	sDone := make(chan *Job)
+	jDone := make(chan *Job)
 	finish := make(chan bool)
 
-	go stage1(s1, conf, exit, sDone)
-	go stage2(s2, s1, sDone)
+	go stage1(s1, conf, exit, jDone)
+	go stage2(s2, s1, jDone)
 
 	go func() {
-		stage3(sDone, s2)
+		stage3(jDone, s2)
 		finish <- true
 	}()
 
@@ -64,7 +64,7 @@ func main() {
 	<-finish
 }
 
-func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, sDone <-chan *Job) {
+func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, jDone <-chan *Job) {
 	ticker := time.Tick(time.Second)
 	for {
 		select {
@@ -92,13 +92,17 @@ func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, sDone <-ch
 						nil,
 					}:
 						inWorkCount++
-					case <-sDone:
-						inWorkCount--
+					case <-jDone:
+						s1 <- &Job{
+							path,
+							&task,
+							nil,
+						}
 					}
 				}
 			}
 			for ; inWorkCount > 0; inWorkCount-- {
-				<-sDone
+				<-jDone
 			}
 		}
 	}
@@ -106,7 +110,7 @@ func stage1(s1 chan<- *Job, conf *config.Config, exit chan os.Signal, sDone <-ch
 
 // sometimes we have problems with locking certain files.
 // So lets lock them not blocking concurrently and push further successful
-func stage2(s2 chan<- *Job, s1 <-chan *Job, sDone chan<- *Job) {
+func stage2(s2 chan<- *Job, s1 <-chan *Job, jDone chan<- *Job) {
 	s2Done := make(chan bool)
 	for i := 10; i > 0; i-- {
 		go func() {
@@ -115,7 +119,7 @@ func stage2(s2 chan<- *Job, s1 <-chan *Job, sDone chan<- *Job) {
 				j.F, err = os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
 				if err != nil {
 					log.Println("File open failed.", err.Error())
-					sDone <- j
+					jDone <- j
 					continue
 				}
 				s2 <- j
@@ -132,7 +136,7 @@ func stage2(s2 chan<- *Job, s1 <-chan *Job, sDone chan<- *Job) {
 	}()
 }
 
-func stage3(sDone chan<- *Job, s2 <-chan *Job) {
+func stage3(jDone chan<- *Job, s2 <-chan *Job) {
 	for j := range s2 {
 		log.Println("Sending file: " + j.Path)
 
@@ -140,14 +144,14 @@ func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 		if err != nil {
 			log.Println("File getting info failed.", err.Error())
 			moveFailed(j)
-			sDone <- j
+			jDone <- j
 			continue
 		}
 
 		if stat.Size() == 0 {
 			log.Println("Got empty file.")
 			moveSuccess(j)
-			sDone <- j
+			jDone <- j
 			continue
 		}
 
@@ -157,7 +161,7 @@ func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 		if err != nil {
 			log.Println("File read failed.", err.Error())
 			moveFailed(j)
-			sDone <- j
+			jDone <- j
 			continue
 		}
 
@@ -168,7 +172,7 @@ func stage3(sDone chan<- *Job, s2 <-chan *Job) {
 			log.Println("Send to rabbit failed. ", err.Error())
 			moveFailed(j)
 		}
-		sDone <- j
+		jDone <- j
 	}
 }
 
