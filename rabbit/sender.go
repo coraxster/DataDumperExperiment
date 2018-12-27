@@ -45,11 +45,17 @@ func (p *Sender) Send(jobs []*job.Job) {
 }
 
 func (p *Sender) sendChunk(jobs []*job.Job) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println("error. sendChunk panics:", r)
+		}
+	}()
+
 	ch := p.Connector.Channel()
 	defer func() {
 		err := ch.Close()
 		if err != nil {
-			log.Println("Channel close error: ", err)
+			log.Println("channel close error: ", err)
 		}
 	}()
 
@@ -71,7 +77,7 @@ func (p *Sender) sendChunk(jobs []*job.Job) {
 	for _, j := range jobs {
 		b, err := j.Bytes()
 		if err != nil {
-			log.Println("File read error: ", err)
+			log.Println("file read error: ", err)
 			j.Failed()
 			continue
 		}
