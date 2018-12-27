@@ -80,17 +80,10 @@ func (connector *Connector) Channel() (ch *amqp.Channel, err error) {
 		}
 	}()
 
-	for {
-		connector.Lock()
-		ch, err = connector.con.Channel()
-		connector.Unlock()
-		if err != nil {
-			log.Println("rabbit channel create failed:", err.Error())
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		return ch, nil
-	}
+	connector.Lock()
+	ch, err = connector.con.Channel()
+	connector.Unlock()
+	return
 }
 
 func (connector *Connector) SeedQueues(queues []string) error {
@@ -108,7 +101,7 @@ func (connector *Connector) SeedQueues(queues []string) error {
 			nil,
 		)
 		if err != nil {
-			return errors.New("Open rabbit channel failed. " + err.Error())
+			return errors.New("Declare rabbit queues failed. " + err.Error())
 		}
 	}
 	return nil

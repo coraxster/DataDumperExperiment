@@ -56,10 +56,16 @@ func (p *Sender) sendChunk(jobs []*job.Job) {
 		log.Println("open channel failed: ", err)
 		return
 	}
+	closeCh := ch.NotifyClose(make(chan *amqp.Error, 1))
 	defer func() {
-		err := ch.Close()
-		if err != nil {
-			log.Println("channel close error: ", err)
+		select {
+		case <-closeCh:
+			return
+		default:
+			err := ch.Close()
+			if err != nil {
+				log.Println("channel close error: ", err)
+			}
 		}
 	}()
 
@@ -71,7 +77,6 @@ func (p *Sender) sendChunk(jobs []*job.Job) {
 		}
 	}
 
-	closeCh := ch.NotifyClose(make(chan *amqp.Error, 1))
 	var ackCh chan amqp.Confirmation
 	if p.WaitAck {
 		ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, len(jobs)))
