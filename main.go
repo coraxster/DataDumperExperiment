@@ -21,20 +21,15 @@ func init() {
 	flag.Parse()
 	var err error
 	conf, err = config.Load(*confFile)
-	if err != nil {
-		log.Fatal("Config load failed. ", err)
-	}
+	exitOnError(err, "Config load failed.")
 }
 
 func main() {
 	rabbitConn, err := rabbit.Make(conf.Rabbit)
-	if err != nil {
-		log.Fatal("Rabbit init failed. ", err)
-	}
+	exitOnError(err, "Rabbit init failed.")
 
-	if rabbitConn.SeedQueues(conf.GetQueues()) != nil {
-		log.Fatal("Seed rabbit queues failed. ", err)
-	}
+	err = rabbitConn.SeedQueues(conf.GetQueues())
+	exitOnError(err, "Seed rabbit queues failed.")
 
 	exit := make(chan os.Signal, 1)
 	signal.Notify(exit, os.Interrupt)
@@ -91,5 +86,11 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 			elapsed := time.Since(start)
 			log.Printf("Dirs walk took %s\n", elapsed)
 		}
+	}
+}
+
+func exitOnError(err error, msg string) {
+	if err != nil {
+		log.Fatalf("%s: %s", msg, err)
 	}
 }
