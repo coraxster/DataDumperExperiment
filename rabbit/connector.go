@@ -72,22 +72,32 @@ func (connector *Connector) support() {
 	}
 }
 
-func (connector *Connector) Channel() *amqp.Channel {
+func (connector *Connector) Channel() (ch *amqp.Channel, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			ch = nil
+			err = errors.New(fmt.Sprintf("Channel() panics: %s", r))
+		}
+	}()
+
 	for {
 		connector.Lock()
-		ch, err := connector.con.Channel()
+		ch, err = connector.con.Channel()
 		connector.Unlock()
 		if err != nil {
 			log.Println("rabbit channel create failed:", err.Error())
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		return ch
+		return ch, nil
 	}
 }
 
 func (connector *Connector) SeedQueues(queues []string) error {
-	ch := connector.Channel()
+	ch, err := connector.Channel()
+	if err != nil {
+		return err
+	}
 	for _, q := range queues {
 		_, err := ch.QueueDeclare(
 			q, // name

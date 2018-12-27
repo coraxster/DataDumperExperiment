@@ -46,12 +46,16 @@ func (p *Sender) Send(jobs []*job.Job) {
 
 func (p *Sender) sendChunk(jobs []*job.Job) {
 	defer func() {
-		if r := recover(); r != nil {
-			log.Println("error. sendChunk panics:", r)
+		if r := recover(); r != nil { // just in case
+			log.Println("error. sendChunk panics: ", r)
 		}
 	}()
 
-	ch := p.Connector.Channel()
+	ch, err := p.Connector.Channel()
+	if err != nil {
+		log.Println("open channel failed: ", err)
+		return
+	}
 	defer func() {
 		err := ch.Close()
 		if err != nil {
