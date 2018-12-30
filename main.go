@@ -12,11 +12,11 @@ import (
 	"time"
 )
 
-var version string
+var version = "unknown"
 var conf *config.Config
 
 func init() {
-	log.Println("DataDumper2. Version: ", version)
+	log.Println("[INFO] DataDumper2. Version: ", version)
 	confFile := flag.String("config", "config.json", "config json file path")
 	flag.Parse()
 	var err error
@@ -45,10 +45,10 @@ func main() {
 
 	//... add consumer-cleaner
 
-	log.Println("Service started.")
+	log.Println("[INFO] Service started.")
 
 	<-fini
-	log.Println("See ya!")
+	log.Println("[INFO] See ya!")
 }
 
 func sendDirs(exit chan os.Signal, s rabbit.Sender) {
@@ -64,7 +64,7 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 				task := t
 				files, err := ioutil.ReadDir(t.InDir)
 				if err != nil {
-					log.Println("Error with read dir: " + err.Error())
+					log.Println("[ERROR] Error with read dir: " + err.Error())
 					continue
 				}
 				for _, f := range files {
@@ -81,16 +81,16 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 			if len(jobs) == 0 {
 				continue
 			}
-			log.Printf("Got %v jobs.\n", len(jobs))
+			log.Printf("[INFO] Got %v jobs.\n", len(jobs))
 			s.Send(jobs)
 			elapsed := time.Since(start)
-			log.Printf("Dirs walk took %s\n", elapsed)
+			log.Printf("[INFO] Dirs walk took %s\n", elapsed)
 		}
 	}
 }
 
 func exitOnError(err error, msg string) {
 	if err != nil {
-		log.Fatalf("%s: %s", msg, err)
+		log.Fatalf("[ERROR] %s: %s", msg, err)
 	}
 }

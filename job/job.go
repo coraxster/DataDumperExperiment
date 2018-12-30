@@ -51,7 +51,7 @@ func (j *Job) Success() {
 	newPath := j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
 	err := os.Rename(j.Path, newPath)
 	if err != nil {
-		log.Println("File move failed. ", err.Error())
+		log.Println("[WARNING] File move failed. ", err.Error())
 	}
 }
 
@@ -59,7 +59,7 @@ func (j *Job) Failed() {
 	newPath := j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
 	err := os.Rename(j.Path, newPath)
 	if err != nil {
-		log.Println("File move failed. ", err.Error())
+		log.Println("[WARNING] File move failed. ", err.Error())
 	}
 }
 

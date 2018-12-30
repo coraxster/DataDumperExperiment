@@ -31,7 +31,7 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Println("Rabbit connected.")
+	log.Println("[INFO] rabbit connected")
 
 	go rabbitConn.support()
 
@@ -51,9 +51,9 @@ func (connector *Connector) connect() error {
 func (connector *Connector) support() {
 	for {
 		lost := <-connector.close
-		log.Println("Connection failed. Error: ", lost.Error())
+		log.Println("[WARNING] Connection failed. Error: ", lost.Error())
 		connector.Lock()
-		log.Println("Try to reconnect.")
+		log.Println("[INFO] Try to reconnect.")
 		for tries := 1; ; tries++ {
 			power := time.Duration(tries)
 			if tries > 30 {
@@ -61,11 +61,11 @@ func (connector *Connector) support() {
 			}
 			err := connector.connect()
 			if err != nil {
-				log.Printf("Rabbit(%v) reconnect failed. Error: %s \n", tries, err.Error())
+				log.Printf("[WARNING] Rabbit reconnect failed(%v). Error: %s \n", tries, err.Error())
 				time.Sleep(500 * power * time.Millisecond)
 				continue
 			}
-			log.Println("Rabbit connected.")
+			log.Println("[INFO] Rabbit connected.")
 			connector.Unlock()
 			break
 		}
@@ -73,13 +73,6 @@ func (connector *Connector) support() {
 }
 
 func (connector *Connector) Channel() (ch *amqp.Channel, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			ch = nil
-			err = errors.New(fmt.Sprintf("Channel() panics: %s", r))
-		}
-	}()
-
 	connector.Lock()
 	ch, err = connector.con.Channel()
 	connector.Unlock()

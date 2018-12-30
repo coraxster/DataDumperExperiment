@@ -47,13 +47,13 @@ func (p *Sender) Send(jobs []*job.Job) {
 func (p *Sender) sendChunk(jobs []*job.Job) {
 	defer func() {
 		if r := recover(); r != nil { // just in case
-			log.Println("error. sendChunk panics: ", r)
+			log.Println("[ERROR] sendChunk panics: ", r)
 		}
 	}()
 
 	ch, err := p.Connector.Channel()
 	if err != nil {
-		log.Println("open channel failed: ", err)
+		log.Println("[WARNING] open channel failed: ", err)
 		return
 	}
 	closeCh := ch.NotifyClose(make(chan *amqp.Error, 1))
@@ -64,21 +64,18 @@ func (p *Sender) sendChunk(jobs []*job.Job) {
 		default:
 			err := ch.Close()
 			if err != nil {
-				log.Println("channel close error: ", err)
+				log.Println("[WARNING] channel close error: ", err)
 			}
 		}
 	}()
 
+	var ackCh chan amqp.Confirmation
 	if p.WaitAck {
 		err := ch.Confirm(false)
 		if err != nil {
-			log.Println("rabbit apply ack mode failed: ", err)
+			log.Println("[WARNING] rabbit apply ack mode failed: ", err)
 			return
 		}
-	}
-
-	var ackCh chan amqp.Confirmation
-	if p.WaitAck {
 		ackCh = ch.NotifyPublish(make(chan amqp.Confirmation, len(jobs)))
 	}
 
@@ -86,7 +83,7 @@ func (p *Sender) sendChunk(jobs []*job.Job) {
 	for _, j := range jobs {
 		b, err := j.Bytes()
 		if err != nil {
-			log.Println("file read error: ", err)
+			log.Println("[WARNING] file read error: ", err)
 			j.Failed()
 			continue
 		}
@@ -100,7 +97,7 @@ func (p *Sender) sendChunk(jobs []*job.Job) {
 				Body:        b,
 			})
 		if err != nil {
-			log.Println("send error: ", err)
+			log.Println("[WARNING] send error: ", err)
 			j.Failed()
 		} else {
 			if !p.WaitAck {
@@ -115,7 +112,7 @@ func (p *Sender) sendChunk(jobs []*job.Job) {
 			select {
 			case result, ok := <-ackCh:
 				if !ok { // looks like channel closed
-					log.Println("channel closed.")
+					log.Println("[WARNING] channel closed.")
 					return
 				}
 				if result.Ack {
@@ -124,7 +121,7 @@ func (p *Sender) sendChunk(jobs []*job.Job) {
 					sentJobs[result.DeliveryTag-1].Failed()
 				}
 			case err := <-closeCh: // looks like channel closed
-				log.Println("channel closed: ", err)
+				log.Println("[WARNING] channel closed: ", err)
 				return
 			}
 		}
