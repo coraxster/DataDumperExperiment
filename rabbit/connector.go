@@ -15,7 +15,6 @@ type Connector struct {
 	con   *amqp.Connection
 	close chan *amqp.Error
 	sync.Mutex
-	waitAck bool
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
@@ -24,7 +23,6 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 		nil,
 		nil,
 		sync.Mutex{},
-		conf.WaitAck,
 	}
 
 	err := rabbitConn.connect()
@@ -44,7 +42,7 @@ func (connector *Connector) connect() error {
 	if err != nil {
 		return errors.New("Connect to rabbit failed. " + err.Error())
 	}
-	connector.close = connector.con.NotifyClose(make(chan *amqp.Error))
+	connector.close = connector.con.NotifyClose(make(chan *amqp.Error, 1))
 	return nil
 }
 
@@ -74,8 +72,13 @@ func (connector *Connector) support() {
 
 func (connector *Connector) Channel() (ch *amqp.Channel, err error) {
 	connector.Lock()
+	defer connector.Unlock()
+
 	ch, err = connector.con.Channel()
-	connector.Unlock()
+	if err != nil {
+		return
+	}
+	err = ch.Confirm(false)
 	return
 }
 
@@ -96,6 +99,11 @@ func (connector *Connector) SeedQueues(queues []string) error {
 		if err != nil {
 			return errors.New("Declare rabbit queues failed. " + err.Error())
 		}
+	}
+
+	err = ch.Close()
+	if err != nil {
+		return err
 	}
 	return nil
 }

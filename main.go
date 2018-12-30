@@ -38,7 +38,6 @@ func main() {
 	go func() {
 		sendDirs(exit, rabbit.Sender{
 			Connector: rabbitConn,
-			WaitAck:   conf.Rabbit.WaitAck,
 		})
 		fini <- true
 	}()
@@ -82,7 +81,7 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 				continue
 			}
 			log.Printf("[INFO] Got %v jobs.\n", len(jobs))
-			s.Send(jobs)
+			s.Process(jobs)
 			elapsed := time.Since(start)
 			log.Printf("[INFO] Dirs walk took %s\n", elapsed)
 		}
