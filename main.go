@@ -82,8 +82,7 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 			}
 			log.Printf("[INFO] Got %v jobs.\n", len(jobs))
 			s.Process(jobs)
-			elapsed := time.Since(start)
-			log.Printf("[INFO] Dirs walk took %s\n", elapsed)
+			logStat(jobs, time.Since(start))
 		}
 	}
 }
@@ -92,4 +91,12 @@ func exitOnError(err error, msg string) {
 	if err != nil {
 		log.Fatalf("[ERROR] %s: %s", msg, err)
 	}
+}
+
+func logStat(jobs []*job.Job, elapsed time.Duration) {
+	result := make(map[job.Status]int)
+	for _, j := range jobs {
+		result[j.S]++
+	}
+	log.Printf("[INFO] Processed stat. Time: %s. New: %d, prepared: %d, success: %d, failed: %d, error: %d \n", elapsed, result[job.StatusNew], result[job.StatusPrepared], result[job.StatusSuccess], result[job.StatusFailed], result[job.StatusError])
 }

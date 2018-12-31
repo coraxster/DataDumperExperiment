@@ -49,7 +49,7 @@ func (connector *Connector) connect() error {
 func (connector *Connector) support() {
 	for {
 		lost := <-connector.close
-		log.Println("[WARNING] Connection failed. Error: ", lost.Error())
+		log.Println("[ERROR] Connection failed. Error: ", lost.Error())
 		connector.Lock()
 		log.Println("[INFO] Try to reconnect.")
 		for tries := 1; ; tries++ {

@@ -27,28 +27,34 @@ const (
 
 func (j *Job) Prepare() (b []byte, err error) {
 	j.f, err = os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
-	defer func() {
-		j.S = StatusPrepared
-		if err != nil {
-			j.S = StatusError
-			fErr := j.f.Close()
-			err = errors.New(err.Error() + fErr.Error())
-		}
-	}()
 	if err != nil {
+		j.S = StatusError
+		err = errors.New("file lock/open failed. " + err.Error())
 		return
 	}
 
+	defer func() {
+		j.S = StatusPrepared
+		if err != nil {
+			j.Failed()
+		}
+	}()
+
 	stat, err := j.f.Stat()
 	if err != nil {
-		err = errors.New("File getting info failed. " + err.Error())
+		err = errors.New("file get info failed. " + err.Error())
+		return
+	}
+
+	if stat.Size() == 0 {
+		err = errors.New("got empty file: " + j.Path)
 		return
 	}
 
 	b = make([]byte, stat.Size())
 	_, err = j.f.Read(b)
 	if err != nil {
-		err = errors.New("File read failed. " + err.Error())
+		err = errors.New("file read failed. " + err.Error())
 		b = nil
 	}
 	return
