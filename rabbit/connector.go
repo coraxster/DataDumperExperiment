@@ -14,6 +14,7 @@ type Connector struct {
 	uri   string
 	con   *amqp.Connection
 	close chan *amqp.Error
+	alive bool
 	sync.Mutex
 }
 
@@ -22,6 +23,7 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 		fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port),
 		nil,
 		nil,
+		false,
 		sync.Mutex{},
 	}
 
@@ -36,13 +38,25 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 	return rabbitConn, nil
 }
 
+func (connector *Connector) IsAlive() bool {
+	connector.Lock()
+	defer connector.Unlock()
+
+	return connector.alive
+}
+
 func (connector *Connector) connect() error {
+	connector.Lock()
+	defer connector.Unlock()
+
+	connector.alive = false
 	var err error
 	connector.con, err = amqp.Dial(connector.uri)
 	if err != nil {
 		return errors.New("Connect to rabbit failed. " + err.Error())
 	}
 	connector.close = connector.con.NotifyClose(make(chan *amqp.Error, 1))
+	connector.alive = true
 	return nil
 }
 
@@ -50,7 +64,6 @@ func (connector *Connector) support() {
 	for {
 		lost := <-connector.close
 		log.Println("[ERROR] Connection failed. Error: ", lost.Error())
-		connector.Lock()
 		log.Println("[INFO] Try to reconnect.")
 		for tries := 1; ; tries++ {
 			power := time.Duration(tries)
@@ -64,7 +77,6 @@ func (connector *Connector) support() {
 				continue
 			}
 			log.Println("[INFO] Rabbit connected.")
-			connector.Unlock()
 			break
 		}
 	}

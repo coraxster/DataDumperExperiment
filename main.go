@@ -57,6 +57,11 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 		case <-exit:
 			return
 		case <-ticker:
+			if !s.IsAlive() {
+				time.Sleep(10 * time.Second)
+				continue
+			}
+
 			start := time.Now()
 			var jobs []*job.Job
 			for _, t := range conf.Tasks {

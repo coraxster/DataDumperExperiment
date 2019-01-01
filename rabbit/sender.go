@@ -10,10 +10,10 @@ import (
 const MaxParallel = 10
 
 type Sender struct {
-	Connector *Connector
+	*Connector
 }
 
-func (p *Sender) Process(jobs []*job.Job) {
+func (s *Sender) Process(jobs []*job.Job) {
 	chunks := job.Split(jobs, 50)
 
 	workersCount := MaxParallel
@@ -33,7 +33,7 @@ func (p *Sender) Process(jobs []*job.Job) {
 	for i := workersCount; i > 0; i-- {
 		go func() {
 			for chunk := range inCh {
-				p.processChunk(chunk)
+				s.processChunk(chunk)
 			}
 			doneCh <- true
 		}()
@@ -44,14 +44,14 @@ func (p *Sender) Process(jobs []*job.Job) {
 	}
 }
 
-func (p *Sender) processChunk(jobs []*job.Job) {
+func (s *Sender) processChunk(jobs []*job.Job) {
 	defer func() {
 		if r := recover(); r != nil { // just in case
 			log.Println("[ERROR] processChunk panics: ", r)
 		}
 	}()
 
-	ch, err := p.Connector.Channel()
+	ch, err := s.Connector.Channel()
 	if err != nil {
 		log.Println("[WARNING] open channel failed: ", err)
 		return
