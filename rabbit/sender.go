@@ -14,7 +14,7 @@ type Sender struct {
 }
 
 func (s *Sender) Process(jobs []*job.Job) {
-	chunks := job.Split(jobs, 50)
+	chunks := job.Split(jobs, 10)
 
 	workersCount := MaxParallel
 	if workersCount > len(chunks) {
@@ -74,8 +74,6 @@ func (s *Sender) processChunk(jobs []*job.Job) {
 	sentJobs := send(ch, jobs, closeCh)
 
 	waitAcks(sentJobs, ackCh, closeCh)
-
-	finish(jobs)
 }
 
 func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Job {
@@ -86,12 +84,6 @@ func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Jo
 			log.Println("[WARNING] channel closed: ", err)
 			return sentJobs
 		default:
-		}
-
-		err := j.Prepare() // lock file
-		if err != nil {
-			log.Println("[WARNING] file lock error: ", err)
-			continue
 		}
 
 		b, err := j.Bytes()
@@ -144,16 +136,8 @@ func waitAcks(sentJobs []*job.Job, ackCh chan amqp.Confirmation, closeCh chan *a
 	}
 
 	for _, j := range sentJobs {
-		if j.S == job.StatusLocked { // has not received ack
+		if j.S == job.StatusLocked { // did not receive ack
 			j.S = job.StatusFailed
-		}
-	}
-}
-
-func finish(jobs []*job.Job) {
-	for _, j := range jobs {
-		if err := j.Finish(); err != nil {
-			log.Println("[WARNING] job finishing error: ", err)
 		}
 	}
 }

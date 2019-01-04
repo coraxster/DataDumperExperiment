@@ -61,35 +61,57 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 				time.Sleep(10 * time.Second)
 				continue
 			}
-
 			start := time.Now()
-			var jobs []*job.Job
-			for _, t := range conf.Tasks {
-				task := t
-				files, err := ioutil.ReadDir(t.InDir)
-				if err != nil {
-					log.Println("[ERROR] Error with read dir: " + err.Error())
-					continue
-				}
-				for _, f := range files {
-					if f.IsDir() {
-						continue
-					}
-					path := t.InDir + string(os.PathSeparator) + f.Name()
-					jobs = append(jobs, &job.Job{
-						Path: path,
-						T:    &task,
-					})
-				}
-			}
+			jobs := prepareJobs()
 			if len(jobs) == 0 {
 				continue
 			}
 			log.Printf("[INFO] Got %v jobs.\n", len(jobs))
-			s.Process(jobs)
+			for _, chunk := range job.Split(jobs, 50) {
+				locked := make([]*job.Job, 0, len(chunk))
+				for _, j := range chunk {
+					if j.Prepare() != nil {
+						log.Println("[WARNING] file lock/open failed.")
+					} else {
+						locked = append(locked, j)
+					}
+				}
+
+				s.Process(locked)
+
+				for _, j := range locked {
+					if err := j.Finish(); err != nil {
+						log.Println("[WARNING] Job finish failed. ", err.Error())
+						continue
+					}
+				}
+			}
 			logStat(jobs, time.Since(start))
 		}
 	}
+}
+
+func prepareJobs() []*job.Job {
+	var jobs []*job.Job
+	for _, t := range conf.Tasks {
+		task := t
+		files, err := ioutil.ReadDir(t.InDir)
+		if err != nil {
+			log.Println("[ERROR] Error with read dir: " + err.Error())
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			path := t.InDir + string(os.PathSeparator) + f.Name()
+			jobs = append(jobs, &job.Job{
+				Path: path,
+				T:    &task,
+			})
+		}
+	}
+	return jobs
 }
 
 func exitOnError(err error, msg string) {
@@ -103,5 +125,5 @@ func logStat(jobs []*job.Job, elapsed time.Duration) {
 	for _, j := range jobs {
 		result[j.S]++
 	}
-	log.Printf("[INFO] Processed stat. Time: %s. Not processed: %d, prepared: %d, success: %d, failed: %d, error: %d \n", elapsed, result[job.StatusUnlocked], result[job.StatusLocked], result[job.StatusSuccess], result[job.StatusFailed], result[job.StatusError])
+	log.Printf("[INFO] Processed stat. Time: %s. New: %d, prepared: %d, success: %d, failed: %d, error: %d \n", elapsed, result[job.StatusUnlocked], result[job.StatusLocked], result[job.StatusSuccess], result[job.StatusFailed], result[job.StatusError])
 }
