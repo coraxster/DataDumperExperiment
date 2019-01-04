@@ -103,5 +103,5 @@ func logStat(jobs []*job.Job, elapsed time.Duration) {
 	for _, j := range jobs {
 		result[j.S]++
 	}
-	log.Printf("[INFO] Processed stat. Time: %s. New: %d, prepared: %d, success: %d, failed: %d, error: %d \n", elapsed, result[job.StatusNew], result[job.StatusPrepared], result[job.StatusSuccess], result[job.StatusFailed], result[job.StatusError])
+	log.Printf("[INFO] Processed stat. Time: %s. Not processed: %d, prepared: %d, success: %d, failed: %d, error: %d \n", elapsed, result[job.StatusUnlocked], result[job.StatusLocked], result[job.StatusSuccess], result[job.StatusFailed], result[job.StatusError])
 }

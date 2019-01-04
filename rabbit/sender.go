@@ -75,6 +75,7 @@ func (s *Sender) processChunk(jobs []*job.Job) {
 
 	waitAcks(sentJobs, ackCh, closeCh)
 
+	finish(jobs)
 }
 
 func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Job {
@@ -87,8 +88,15 @@ func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Jo
 		default:
 		}
 
-		b, err := j.Prepare()
+		err := j.Prepare() // lock file
 		if err != nil {
+			log.Println("[WARNING] file lock error: ", err)
+			continue
+		}
+
+		b, err := j.Bytes()
+		if err != nil {
+			j.S = job.StatusFailed
 			log.Println("[WARNING] file read error: ", err)
 			continue
 		}
@@ -104,7 +112,7 @@ func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Jo
 			})
 		if err != nil {
 			log.Println("[WARNING] send error: ", err)
-			j.Failed()
+			j.S = job.StatusFailed
 		} else {
 			sentJobs = append(sentJobs, j)
 		}
@@ -119,25 +127,33 @@ func waitAcks(sentJobs []*job.Job, ackCh chan amqp.Confirmation, closeCh chan *a
 		case result, ok := <-ackCh:
 			if !ok { // looks like channel closed
 				log.Println("[WARNING] channel closed.")
-				return
+				break
 			}
 			if result.Ack {
-				sentJobs[result.DeliveryTag-1].Success()
+				sentJobs[result.DeliveryTag-1].S = job.StatusSuccess
 			} else {
-				sentJobs[result.DeliveryTag-1].Failed()
+				sentJobs[result.DeliveryTag-1].S = job.StatusFailed
 			}
 		case err := <-closeCh: // looks like channel closed
 			log.Println("[WARNING] channel closed: ", err)
-			return
+			break
 		case <-timeOut:
 			log.Println("[WARNING] wait ack timed out")
-			return
+			break
 		}
 	}
 
 	for _, j := range sentJobs {
-		if j.S == job.StatusPrepared { // did not receive ack
-			j.Failed()
+		if j.S == job.StatusLocked { // has not received ack
+			j.S = job.StatusFailed
+		}
+	}
+}
+
+func finish(jobs []*job.Job) {
+	for _, j := range jobs {
+		if err := j.Finish(); err != nil {
+			log.Println("[WARNING] job finishing error: ", err)
 		}
 	}
 }

@@ -3,7 +3,6 @@ package job
 import (
 	"errors"
 	"github.com/coraxster/DataDumper/config"
-	"log"
 	"os"
 	"path/filepath"
 )
@@ -18,28 +17,24 @@ type Job struct {
 type Status int
 
 const (
-	StatusNew = iota // default state
-	StatusPrepared
+	StatusUnlocked = iota // default state
+	StatusLocked
 	StatusSuccess
 	StatusFailed
 	StatusError
 )
 
-func (j *Job) Prepare() (b []byte, err error) {
+func (j *Job) Prepare() error {
+	var err error
 	j.f, err = os.OpenFile(j.Path, os.O_RDWR, os.ModeExclusive)
+	j.S = StatusLocked
 	if err != nil {
 		j.S = StatusError
-		err = errors.New("file lock/open failed. " + err.Error())
-		return
 	}
+	return err
+}
 
-	defer func() {
-		j.S = StatusPrepared
-		if err != nil {
-			j.Failed()
-		}
-	}()
-
+func (j *Job) Bytes() (b []byte, err error) {
 	stat, err := j.f.Stat()
 	if err != nil {
 		err = errors.New("file get info failed. " + err.Error())
@@ -60,34 +55,26 @@ func (j *Job) Prepare() (b []byte, err error) {
 	return
 }
 
-func (j *Job) Success() {
-	j.S = StatusSuccess
-	if err := j.f.Close(); err != nil {
-		j.S = StatusError
-		log.Println("[WARNING] File unlock failed. ", err.Error())
-		return
+func (j *Job) Finish() error {
+	if j.S != StatusSuccess && j.S != StatusFailed && j.S != StatusLocked {
+		return nil
 	}
-	newPath := j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
-	err := os.Rename(j.Path, newPath)
+	err := j.f.Close()
 	if err != nil {
 		j.S = StatusError
-		log.Println("[WARNING] File move failed. ", err.Error())
+		return err
 	}
-}
-
-func (j *Job) Failed() {
-	j.S = StatusFailed
-	if err := j.f.Close(); err != nil {
-		j.S = StatusError
-		log.Println("[WARNING] File unlock failed. ", err.Error())
-		return
+	var newPath string
+	if j.S == StatusSuccess {
+		newPath = j.T.OutDir + string(os.PathSeparator) + filepath.Base(j.Path)
 	}
-	newPath := j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
-	err := os.Rename(j.Path, newPath)
-	if err != nil {
-		j.S = StatusError
-		log.Println("[WARNING] File move failed. ", err.Error())
+	if j.S == StatusFailed {
+		newPath = j.T.ErrDir + string(os.PathSeparator) + filepath.Base(j.Path)
 	}
+	if newPath != "" {
+		err = os.Rename(j.Path, newPath)
+	}
+	return err
 }
 
 func Split(jobs []*Job, lim int) [][]*Job {
