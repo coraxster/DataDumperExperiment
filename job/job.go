@@ -42,7 +42,7 @@ func (j *Job) Bytes() (b []byte, err error) {
 		return
 	}
 
-	b = make([]byte, 0, stat.Size())
+	b = make([]byte, stat.Size())
 
 	if stat.Size() == 0 {
 		return b, nil
