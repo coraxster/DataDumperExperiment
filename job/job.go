@@ -37,18 +37,20 @@ func (j *Job) Prepare() error {
 func (j *Job) Bytes() (b []byte, err error) {
 	stat, err := j.f.Stat()
 	if err != nil {
+		j.S = StatusError
 		err = errors.New("file get info failed. " + err.Error())
 		return
 	}
 
+	b = make([]byte, 0, stat.Size())
+
 	if stat.Size() == 0 {
-		err = errors.New("got empty file: " + j.Path)
-		return
+		return b, nil
 	}
 
-	b = make([]byte, stat.Size())
 	_, err = j.f.Read(b)
 	if err != nil {
+		j.S = StatusError
 		err = errors.New("file read failed. " + err.Error())
 		b = nil
 	}
@@ -73,6 +75,9 @@ func (j *Job) Finish() error {
 	}
 	if newPath != "" {
 		err = os.Rename(j.Path, newPath)
+	}
+	if err != nil {
+		j.S = StatusError
 	}
 	return err
 }

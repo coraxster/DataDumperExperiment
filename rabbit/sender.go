@@ -96,8 +96,13 @@ func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Jo
 
 		b, err := j.Bytes()
 		if err != nil {
-			j.S = job.StatusFailed
 			log.Println("[WARNING] file read error: ", err)
+			continue
+		}
+
+		if len(b) == 0 {
+			j.S = job.StatusFailed
+			log.Println("got empty file: ", j.Path)
 			continue
 		}
 
