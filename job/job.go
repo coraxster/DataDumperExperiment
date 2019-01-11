@@ -1,17 +1,18 @@
 package job
 
 import (
-	"errors"
 	"github.com/coraxster/DataDumper/config"
+	"github.com/pkg/errors"
 	"os"
 	"path/filepath"
 )
 
 type Job struct {
-	Path string
-	T    *config.Task
-	S    Status
-	f    *os.File
+	Path   string
+	T      *config.Task
+	S      Status
+	f      *os.File
+	errors []error
 }
 
 type Status int
@@ -30,6 +31,7 @@ func (j *Job) Prepare() error {
 	j.S = StatusLocked
 	if err != nil {
 		j.S = StatusError
+		j.errors = append(j.errors, err)
 	}
 	return err
 }
@@ -38,7 +40,8 @@ func (j *Job) Bytes() (b []byte, err error) {
 	stat, err := j.f.Stat()
 	if err != nil {
 		j.S = StatusError
-		err = errors.New("file get info failed. " + err.Error())
+		err = errors.Wrap(err, "file get info failed")
+		j.errors = append(j.errors, err)
 		return
 	}
 
@@ -51,7 +54,8 @@ func (j *Job) Bytes() (b []byte, err error) {
 	_, err = j.f.Read(b)
 	if err != nil {
 		j.S = StatusError
-		err = errors.New("file read failed. " + err.Error())
+		err = errors.Wrap(err, "file read failed")
+		j.errors = append(j.errors, err)
 		b = nil
 	}
 	return
@@ -64,6 +68,7 @@ func (j *Job) Finish() error {
 	err := j.f.Close()
 	if err != nil {
 		j.S = StatusError
+		j.errors = append(j.errors, err)
 		return err
 	}
 	var newPath string
@@ -78,8 +83,17 @@ func (j *Job) Finish() error {
 	}
 	if err != nil {
 		j.S = StatusError
+		j.errors = append(j.errors, err)
 	}
 	return err
+}
+
+func (j *Job) Error() string {
+	var s string
+	for _, e := range j.errors {
+		s = s + ", " + e.Error()
+	}
+	return s
 }
 
 func Split(jobs []*Job, lim int) [][]*Job {
