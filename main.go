@@ -63,33 +63,41 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 			}
 
 			start := time.Now()
-			var jobs []*job.Job
-			for _, t := range conf.Tasks {
-				task := t
-				files, err := ioutil.ReadDir(t.InDir)
-				if err != nil {
-					log.Println("[ERROR] Error with read dir: " + err.Error())
-					continue
-				}
-				for _, f := range files {
-					if f.IsDir() {
-						continue
-					}
-					path := t.InDir + string(os.PathSeparator) + f.Name()
-					jobs = append(jobs, &job.Job{
-						Path: path,
-						T:    &task,
-					})
-				}
-			}
+
+			jobs := makeJobs()
+
 			if len(jobs) == 0 {
 				continue
 			}
+
 			log.Printf("[INFO] Got %v jobs.\n", len(jobs))
 			s.Process(jobs)
 			logStat(jobs, time.Since(start))
 		}
 	}
+}
+
+func makeJobs() []*job.Job {
+	var jobs []*job.Job
+	for _, t := range conf.Tasks {
+		task := t
+		files, err := ioutil.ReadDir(t.InDir)
+		if err != nil {
+			log.Println("[ERROR] Error with read dir: " + err.Error())
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			path := t.InDir + string(os.PathSeparator) + f.Name()
+			jobs = append(jobs, &job.Job{
+				Path: path,
+				T:    &task,
+			})
+		}
+	}
+	return jobs
 }
 
 func exitOnError(err error, msg string) {
