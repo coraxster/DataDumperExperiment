@@ -2,7 +2,7 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
+	"github.com/pkg/errors"
 	"io/ioutil"
 	"os"
 )
@@ -75,7 +75,7 @@ func checkDir(s string) error {
 	if os.IsNotExist(err) {
 		err = os.MkdirAll(s, 0755)
 		if err != nil {
-			return errors.New("create dir failed: " + err.Error())
+			return errors.Wrap(err, "create dir failed")
 		}
 		info, err = os.Stat(s)
 	}
@@ -90,12 +90,12 @@ func checkDir(s string) error {
 
 	err = ioutil.WriteFile(s+"/test", []byte("Hi\n"), 0666)
 	if err != nil {
-		return errors.New("write temp file failed: " + err.Error())
+		return errors.Wrap(err, "write temp file failed")
 	}
 
 	err = os.Remove(s + "/test")
 	if err != nil {
-		return errors.New("delete temp file failed: " + err.Error())
+		return errors.Wrap(err, "delete temp file failed")
 	}
 
 	return nil

@@ -1,9 +1,9 @@
 package rabbit
 
 import (
-	"errors"
 	"fmt"
 	"github.com/coraxster/DataDumper/config"
+	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
 	"log"
 	"math/rand"
@@ -52,7 +52,7 @@ func (connector *Connector) IsAlive() bool {
 func (connector *Connector) connect() error {
 	conn, err := amqp.Dial(connector.uri)
 	if err != nil {
-		return errors.New("Connect to rabbit failed. " + err.Error())
+		return errors.Wrap(err, "connect to rabbit failed")
 	}
 	connector.Lock()
 	connector.conns[conn] = true
@@ -129,7 +129,7 @@ func (connector *Connector) SeedQueues(queues []string) error {
 			nil,
 		)
 		if err != nil {
-			return errors.New("Declare rabbit queues failed. " + err.Error())
+			return errors.Wrap(err, "declare rabbit queues failed")
 		}
 	}
 
