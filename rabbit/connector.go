@@ -6,32 +6,36 @@ import (
 	"github.com/coraxster/DataDumper/config"
 	"github.com/streadway/amqp"
 	"log"
+	"math/rand"
 	"sync"
 	"time"
 )
 
 type Connector struct {
 	uri   string
-	con   *amqp.Connection
+	conns map[*amqp.Connection]bool
 	close chan *amqp.Error
 	alive bool
-	sync.Mutex
+	sync.RWMutex
 }
 
 func Make(conf config.RabbitConfig) (*Connector, error) {
 	rabbitConn := &Connector{
 		fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port),
-		nil,
-		nil,
+		make(map[*amqp.Connection]bool),
+		make(chan *amqp.Error),
 		false,
-		sync.Mutex{},
+		sync.RWMutex{},
 	}
 
-	err := rabbitConn.connect()
-	if err != nil {
-		return nil, err
+	for i := 0; i < 10; i++ {
+		err := rabbitConn.connect()
+		if err != nil {
+			return nil, err
+		}
 	}
-	log.Println("[INFO] rabbit connected")
+
+	log.Println("[INFO] rabbit connected: ", len(rabbitConn.conns))
 
 	go rabbitConn.support()
 
@@ -39,31 +43,37 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 }
 
 func (connector *Connector) IsAlive() bool {
-	connector.Lock()
-	defer connector.Unlock()
+	connector.RLock()
+	defer connector.RUnlock()
 
-	return connector.alive
+	return len(connector.conns) > 0
 }
 
 func (connector *Connector) connect() error {
-	connector.Lock()
-	defer connector.Unlock()
-
-	connector.alive = false
-	var err error
-	connector.con, err = amqp.Dial(connector.uri)
+	conn, err := amqp.Dial(connector.uri)
 	if err != nil {
 		return errors.New("Connect to rabbit failed. " + err.Error())
 	}
-	connector.close = connector.con.NotifyClose(make(chan *amqp.Error, 1))
-	connector.alive = true
+	connector.Lock()
+	connector.conns[conn] = true
+	connector.Unlock()
+
+	lost := conn.NotifyClose(make(chan *amqp.Error, 1))
+	go func() {
+		err := <-lost
+		log.Println("[ERROR] Connection failed. Error: ", err.Error())
+		connector.Lock()
+		delete(connector.conns, conn)
+		connector.Unlock()
+		connector.close <- err
+	}()
+
 	return nil
 }
 
 func (connector *Connector) support() {
 	for {
-		lost := <-connector.close
-		log.Println("[ERROR] Connection failed. Error: ", lost.Error())
+		<-connector.close
 		log.Println("[INFO] Try to reconnect.")
 		for tries := 1; ; tries++ {
 			power := time.Duration(tries)
@@ -83,10 +93,20 @@ func (connector *Connector) support() {
 }
 
 func (connector *Connector) Channel() (ch *amqp.Channel, err error) {
-	connector.Lock()
-	defer connector.Unlock()
+	var conn *amqp.Connection
+	rand.Seed(int64(time.Now().Nanosecond()))
+	connector.RLock()
+	n := rand.Intn(len(connector.conns))
+	for conn = range connector.conns {
+		if n == 0 {
+			break
+		}
+		n--
+	}
 
-	ch, err = connector.con.Channel()
+	connector.RUnlock()
+
+	ch, err = conn.Channel()
 	if err != nil {
 		return
 	}
