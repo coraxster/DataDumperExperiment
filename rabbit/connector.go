@@ -2,7 +2,6 @@ package rabbit
 
 import (
 	"fmt"
-	"github.com/coraxster/DataDumper/config"
 	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
 	"log"
@@ -11,7 +10,13 @@ import (
 	"time"
 )
 
-type Connector struct {
+type Connector interface {
+	IsAlive() bool
+	Channel() (*amqp.Channel, error)
+	SeedQueues([]string) error
+}
+
+type connector struct {
 	uri   string
 	conns map[*amqp.Connection]bool
 	close chan *amqp.Error
@@ -19,16 +24,16 @@ type Connector struct {
 	sync.RWMutex
 }
 
-func Make(conf config.RabbitConfig) (*Connector, error) {
-	rabbitConn := &Connector{
-		fmt.Sprintf("amqp://%s:%s@%s:%v/", conf.User, conf.Pass, conf.Host, conf.Port),
+func Make(user, pass, host, port string, connNumber int) (Connector, error) {
+	rabbitConn := &connector{
+		fmt.Sprintf("amqp://%s:%s@%s:%v/", user, pass, host, port),
 		make(map[*amqp.Connection]bool),
 		make(chan *amqp.Error),
 		false,
 		sync.RWMutex{},
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < connNumber; i++ {
 		err := rabbitConn.connect()
 		if err != nil {
 			return nil, err
@@ -42,14 +47,14 @@ func Make(conf config.RabbitConfig) (*Connector, error) {
 	return rabbitConn, nil
 }
 
-func (connector *Connector) IsAlive() bool {
+func (connector *connector) IsAlive() bool {
 	connector.RLock()
 	defer connector.RUnlock()
 
 	return len(connector.conns) > 0
 }
 
-func (connector *Connector) connect() error {
+func (connector *connector) connect() error {
 	conn, err := amqp.Dial(connector.uri)
 	if err != nil {
 		return errors.Wrap(err, "connect to rabbit failed")
@@ -71,7 +76,7 @@ func (connector *Connector) connect() error {
 	return nil
 }
 
-func (connector *Connector) support() {
+func (connector *connector) support() {
 	for {
 		<-connector.close
 		log.Println("[INFO] Try to reconnect.")
@@ -92,7 +97,7 @@ func (connector *Connector) support() {
 	}
 }
 
-func (connector *Connector) Channel() (ch *amqp.Channel, err error) {
+func (connector *connector) Channel() (ch *amqp.Channel, err error) {
 	var conn *amqp.Connection
 	rand.Seed(int64(time.Now().Nanosecond()))
 	connector.RLock()
@@ -114,7 +119,7 @@ func (connector *Connector) Channel() (ch *amqp.Channel, err error) {
 	return
 }
 
-func (connector *Connector) SeedQueues(queues []string) error {
+func (connector *connector) SeedQueues(queues []string) error {
 	ch, err := connector.Channel()
 	if err != nil {
 		return err

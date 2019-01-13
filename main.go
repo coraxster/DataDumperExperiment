@@ -25,7 +25,7 @@ func init() {
 }
 
 func main() {
-	rabbitConn, err := rabbit.Make(conf.Rabbit)
+	rabbitConn, err := rabbit.Make(conf.Rabbit.User, conf.Rabbit.Pass, conf.Rabbit.Host, conf.Rabbit.Port, conf.Rabbit.ConnN)
 	exitOnError(err, "Rabbit init failed.")
 
 	err = rabbitConn.SeedQueues(conf.GetQueues())
@@ -77,8 +77,8 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 	}
 }
 
-func makeJobs() []*job.Job {
-	var jobs []*job.Job
+func makeJobs() []job.Job {
+	var jobs []job.Job
 	for _, t := range conf.Tasks {
 		task := t
 		files, err := ioutil.ReadDir(t.InDir)
@@ -91,10 +91,7 @@ func makeJobs() []*job.Job {
 				continue
 			}
 			path := t.InDir + string(os.PathSeparator) + f.Name()
-			jobs = append(jobs, &job.Job{
-				Path: path,
-				T:    &task,
-			})
+			jobs = append(jobs, job.MakeJob(path, &task))
 		}
 	}
 	return jobs
@@ -106,10 +103,10 @@ func exitOnError(err error, msg string) {
 	}
 }
 
-func logStat(jobs []*job.Job, elapsed time.Duration) {
+func logStat(jobs []job.Job, elapsed time.Duration) {
 	result := make(map[job.Status]int)
 	for _, j := range jobs {
-		result[j.S]++
+		result[j.GetStatus()]++
 	}
 	log.Printf("[INFO] Processed stat. Time: %s. Not processed: %d, prepared: %d, success: %d, failed: %d, error: %d \n", elapsed, result[job.StatusUnlocked], result[job.StatusLocked], result[job.StatusSuccess], result[job.StatusFailed], result[job.StatusError])
 }

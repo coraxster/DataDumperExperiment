@@ -10,10 +10,10 @@ import (
 const MaxParallel = 10
 
 type Sender struct {
-	*Connector
+	Connector
 }
 
-func (s *Sender) Process(jobs []*job.Job) {
+func (s *Sender) Process(jobs []job.Job) {
 	chunks := job.Split(jobs, 50)
 
 	workersCount := MaxParallel
@@ -21,7 +21,7 @@ func (s *Sender) Process(jobs []*job.Job) {
 		workersCount = len(chunks)
 	}
 
-	inCh := make(chan []*job.Job)
+	inCh := make(chan []job.Job)
 	doneCh := make(chan bool)
 	go func() {
 		for _, chunk := range chunks {
@@ -44,7 +44,7 @@ func (s *Sender) Process(jobs []*job.Job) {
 	}
 }
 
-func (s *Sender) processChunk(jobs []*job.Job) {
+func (s *Sender) processChunk(jobs []job.Job) {
 	defer func() {
 		if r := recover(); r != nil { // just in case
 			log.Println("[ERROR] processChunk panics: ", r)
@@ -78,8 +78,8 @@ func (s *Sender) processChunk(jobs []*job.Job) {
 	finish(jobs)
 }
 
-func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Job {
-	sentJobs := make([]*job.Job, 0, len(jobs))
+func send(ch *amqp.Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
+	sentJobs := make([]job.Job, 0, len(jobs))
 	for _, j := range jobs {
 		select {
 		case err := <-closeCh: // looks like channel closed
@@ -101,23 +101,23 @@ func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Jo
 		}
 
 		if len(b) == 0 {
-			j.S = job.StatusFailed
-			log.Println("[WARNING] got empty file: ", j.Path)
+			j.SetStatus(job.StatusFailed)
+			log.Println("[WARNING] got empty file: ", j.GetPath())
 			continue
 		}
 
 		err = ch.Publish(
-			"",        // exchange
-			j.T.Queue, // routing key
-			true,      // mandatory
-			false,     // immediate
+			"",           // exchange
+			j.GetQueue(), // routing key
+			true,         // mandatory
+			false,        // immediate
 			amqp.Publishing{
 				ContentType: "text/plain",
 				Body:        b,
 			})
 		if err != nil {
 			log.Println("[WARNING] send error: ", err)
-			j.S = job.StatusFailed
+			j.SetStatus(job.StatusFailed)
 		} else {
 			sentJobs = append(sentJobs, j)
 		}
@@ -125,7 +125,7 @@ func send(ch *amqp.Channel, jobs []*job.Job, closeCh chan *amqp.Error) []*job.Jo
 	return sentJobs
 }
 
-func waitAcks(sentJobs []*job.Job, ackCh chan amqp.Confirmation, closeCh chan *amqp.Error) {
+func waitAcks(sentJobs []job.Job, ackCh chan amqp.Confirmation, closeCh chan *amqp.Error) {
 	timeOut := time.After(10 * time.Second)
 	for range sentJobs {
 		select {
@@ -135,9 +135,9 @@ func waitAcks(sentJobs []*job.Job, ackCh chan amqp.Confirmation, closeCh chan *a
 				break
 			}
 			if result.Ack {
-				sentJobs[result.DeliveryTag-1].S = job.StatusSuccess
+				sentJobs[result.DeliveryTag-1].SetStatus(job.StatusSuccess)
 			} else {
-				sentJobs[result.DeliveryTag-1].S = job.StatusFailed
+				sentJobs[result.DeliveryTag-1].SetStatus(job.StatusFailed)
 			}
 		case err := <-closeCh: // looks like channel closed
 			log.Println("[WARNING] channel closed: ", err)
@@ -149,13 +149,13 @@ func waitAcks(sentJobs []*job.Job, ackCh chan amqp.Confirmation, closeCh chan *a
 	}
 
 	for _, j := range sentJobs {
-		if j.S == job.StatusLocked { // has not received ack
-			j.S = job.StatusFailed
+		if j.GetStatus() == job.StatusLocked { // has not received ack
+			j.SetStatus(job.StatusFailed)
 		}
 	}
 }
 
-func finish(jobs []*job.Job) {
+func finish(jobs []job.Job) {
 	for _, j := range jobs {
 		if err := j.Finish(); err != nil {
 			log.Println("[WARNING] job finishing error: ", err)
