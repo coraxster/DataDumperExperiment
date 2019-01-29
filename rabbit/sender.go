@@ -39,7 +39,6 @@ func (s *Sender) Process(jobs []job.Job) {
 			}
 		}()
 	}
-
 	wg.Wait()
 }
 
@@ -87,12 +86,6 @@ func send(ch Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
 		default:
 		}
 
-		err := j.Prepare() // lock file
-		if err != nil {
-			log.Println("[WARNING] file lock error: ", err)
-			continue
-		}
-
 		b, err := j.Bytes()
 		if err != nil {
 			log.Println("[WARNING] file read error: ", err)
@@ -126,12 +119,13 @@ func send(ch Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
 
 func waitAcks(sentJobs []job.Job, ackCh chan amqp.Confirmation, closeCh chan *amqp.Error) {
 	timeOut := time.After(10 * time.Second)
+fl:
 	for range sentJobs {
 		select {
 		case result, ok := <-ackCh:
 			if !ok { // looks like channel closed
 				log.Println("[WARNING] channel closed.")
-				break
+				break fl
 			}
 			if result.Ack {
 				sentJobs[result.DeliveryTag-1].SetStatus(job.StatusSuccess)
@@ -140,10 +134,10 @@ func waitAcks(sentJobs []job.Job, ackCh chan amqp.Confirmation, closeCh chan *am
 			}
 		case err := <-closeCh: // looks like channel closed
 			log.Println("[WARNING] channel closed: ", err)
-			break
+			break fl
 		case <-timeOut:
 			log.Println("[WARNING] wait ack timed out")
-			break
+			break fl
 		}
 	}
 

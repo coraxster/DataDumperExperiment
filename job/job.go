@@ -9,10 +9,8 @@ import (
 )
 
 type Job interface {
-	Prepare() error
 	Bytes() ([]byte, error)
 	Finish() error
-	Error() string
 	SetStatus(Status)
 	GetStatus() Status
 	GetQueue() string
@@ -31,11 +29,10 @@ const (
 )
 
 type job struct {
-	path   string
-	t      *config.Task
-	s      Status
-	f      *os.File
-	errors []error
+	path string
+	t    *config.Task
+	s    Status
+	f    *os.File
 }
 
 func MakeJob(path string, task *config.Task) Job {
@@ -61,35 +58,25 @@ func (j *job) GetQueue() string {
 	return j.t.Queue
 }
 
-func (j *job) Prepare() error {
-	if j.s != StatusUnlocked {
-		return errors.New("job has wrong status")
-	}
-	var err error
+func (j *job) Bytes() (b []byte, err error) {
 	j.f, err = os.OpenFile(j.path, os.O_RDWR, os.ModeExclusive)
 	j.s = StatusLocked
 	if err != nil {
 		j.s = StatusError
-		j.errors = append(j.errors, err)
+		err = errors.Wrap(err, "file open failed")
+		return
 	}
-	return err
-}
-
-func (j *job) Bytes() (b []byte, err error) {
 	stat, err := j.f.Stat()
 	if err != nil {
 		j.s = StatusError
 		err = errors.Wrap(err, "file get info failed")
-		j.errors = append(j.errors, err)
+		_ = j.f.Close()
 		return
 	}
-
 	b = make([]byte, stat.Size())
-
 	if stat.Size() == 0 {
 		return b, nil
 	}
-
 	_, err = j.f.Read(b)
 	if err == io.EOF {
 		return b, nil
@@ -97,8 +84,8 @@ func (j *job) Bytes() (b []byte, err error) {
 	if err != nil {
 		j.s = StatusError
 		err = errors.Wrap(err, "file read failed")
-		j.errors = append(j.errors, err)
 		b = nil
+		_ = j.f.Close()
 	}
 	return
 }
@@ -110,7 +97,6 @@ func (j *job) Finish() error {
 	err := j.f.Close()
 	if err != nil {
 		j.s = StatusError
-		j.errors = append(j.errors, err)
 		return err
 	}
 	var newPath string
@@ -126,17 +112,8 @@ func (j *job) Finish() error {
 	j.s = StatusFinished
 	if err != nil {
 		j.s = StatusError
-		j.errors = append(j.errors, err)
 	}
 	return err
-}
-
-func (j *job) Error() string {
-	var s string
-	for _, e := range j.errors {
-		s = s + ", " + e.Error()
-	}
-	return s
 }
 
 func Split(jobs []Job, lim int) [][]Job {
