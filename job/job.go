@@ -10,28 +10,14 @@ import (
 
 type Job interface {
 	Bytes() ([]byte, error)
-	Finish() error
-	SetStatus(Status)
-	GetStatus() Status
+	Finish(bool) error
 	GetQueue() string
 	GetPath() string
 }
 
-type Status int
-
-const (
-	StatusUnlocked Status = iota // default state
-	StatusLocked
-	StatusSuccess
-	StatusFailed
-	StatusError
-	StatusFinished
-)
-
 type job struct {
 	path string
 	t    *config.Task
-	s    Status
 	f    *os.File
 }
 
@@ -40,14 +26,6 @@ func MakeJob(path string, task *config.Task) Job {
 		path: path,
 		t:    task,
 	}
-}
-
-func (j *job) SetStatus(s Status) {
-	j.s = s
-}
-
-func (j *job) GetStatus() Status {
-	return j.s
 }
 
 func (j *job) GetPath() string {
@@ -60,15 +38,12 @@ func (j *job) GetQueue() string {
 
 func (j *job) Bytes() (b []byte, err error) {
 	j.f, err = os.OpenFile(j.path, os.O_RDWR, os.ModeExclusive)
-	j.s = StatusLocked
 	if err != nil {
-		j.s = StatusError
 		err = errors.Wrap(err, "file open failed")
 		return
 	}
 	stat, err := j.f.Stat()
 	if err != nil {
-		j.s = StatusError
 		err = errors.Wrap(err, "file get info failed")
 		_ = j.f.Close()
 		return
@@ -82,7 +57,6 @@ func (j *job) Bytes() (b []byte, err error) {
 		return b, nil
 	}
 	if err != nil {
-		j.s = StatusError
 		err = errors.Wrap(err, "file read failed")
 		b = nil
 		_ = j.f.Close()
@@ -90,30 +64,18 @@ func (j *job) Bytes() (b []byte, err error) {
 	return
 }
 
-func (j *job) Finish() error {
-	if j.s != StatusSuccess && j.s != StatusFailed && j.s != StatusLocked {
-		return nil
-	}
+func (j *job) Finish(result bool) error {
 	err := j.f.Close()
 	if err != nil {
-		j.s = StatusError
 		return err
 	}
 	var newPath string
-	if j.s == StatusSuccess {
+	if result {
 		newPath = j.t.OutDir + string(os.PathSeparator) + filepath.Base(j.path)
-	}
-	if j.s == StatusFailed {
+	} else {
 		newPath = j.t.ErrDir + string(os.PathSeparator) + filepath.Base(j.path)
 	}
-	if newPath != "" {
-		err = os.Rename(j.path, newPath)
-	}
-	j.s = StatusFinished
-	if err != nil {
-		j.s = StatusError
-	}
-	return err
+	return os.Rename(j.path, newPath)
 }
 
 func Split(jobs []Job, lim int) [][]Job {

@@ -37,6 +37,7 @@ func (s *Sender) Process(jobs []job.Job) {
 			for chunk := range inCh {
 				s.processChunk(chunk)
 			}
+			wg.Done()
 		}()
 	}
 	wg.Wait()
@@ -72,8 +73,6 @@ func (s *Sender) processChunk(jobs []job.Job) {
 	sentJobs := send(ch, jobs, closeCh)
 
 	waitAcks(sentJobs, ackCh, closeCh)
-
-	finish(jobs)
 }
 
 func send(ch Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
@@ -93,8 +92,11 @@ func send(ch Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
 		}
 
 		if len(b) == 0 {
-			j.SetStatus(job.StatusFailed)
 			log.Println("[WARNING] got empty file: ", j.GetPath())
+			err = j.Finish(false)
+			if err != nil {
+				log.Println("[WARNING] job finishing error: ", err)
+			}
 			continue
 		}
 
@@ -109,7 +111,9 @@ func send(ch Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
 			})
 		if err != nil {
 			log.Println("[WARNING] send error: ", err)
-			j.SetStatus(job.StatusFailed)
+			if err = j.Finish(false); err != nil {
+				log.Println("[WARNING] job finishing error: ", err)
+			}
 		} else {
 			sentJobs = append(sentJobs, j)
 		}
@@ -119,6 +123,7 @@ func send(ch Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
 
 func waitAcks(sentJobs []job.Job, ackCh chan amqp.Confirmation, closeCh chan *amqp.Error) {
 	timeOut := time.After(10 * time.Second)
+	received := make([]bool, len(sentJobs))
 fl:
 	for range sentJobs {
 		select {
@@ -127,10 +132,10 @@ fl:
 				log.Println("[WARNING] channel closed.")
 				break fl
 			}
-			if result.Ack {
-				sentJobs[result.DeliveryTag-1].SetStatus(job.StatusSuccess)
-			} else {
-				sentJobs[result.DeliveryTag-1].SetStatus(job.StatusFailed)
+			received[result.DeliveryTag-1] = true
+			err := sentJobs[result.DeliveryTag-1].Finish(result.Ack)
+			if err != nil {
+				log.Println("[WARNING] job finishing error: ", err)
 			}
 		case err := <-closeCh: // looks like channel closed
 			log.Println("[WARNING] channel closed: ", err)
@@ -141,17 +146,12 @@ fl:
 		}
 	}
 
-	for _, j := range sentJobs {
-		if j.GetStatus() == job.StatusLocked { // has not received ack
-			j.SetStatus(job.StatusFailed)
-		}
-	}
-}
-
-func finish(jobs []job.Job) {
-	for _, j := range jobs {
-		if err := j.Finish(); err != nil {
-			log.Println("[WARNING] job finishing error: ", err)
+	for i, j := range sentJobs {
+		if !received[i] {
+			err := j.Finish(false)
+			if err != nil {
+				log.Println("[WARNING] job finishing error: ", err)
+			}
 		}
 	}
 }
