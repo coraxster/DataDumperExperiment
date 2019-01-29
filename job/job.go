@@ -3,6 +3,7 @@ package job
 import (
 	"github.com/coraxster/DataDumper/config"
 	"github.com/pkg/errors"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -21,11 +22,12 @@ type Job interface {
 type Status int
 
 const (
-	StatusUnlocked = iota // default state
+	StatusUnlocked Status = iota // default state
 	StatusLocked
 	StatusSuccess
 	StatusFailed
 	StatusError
+	StatusFinished
 )
 
 type job struct {
@@ -60,6 +62,9 @@ func (j *job) GetQueue() string {
 }
 
 func (j *job) Prepare() error {
+	if j.s != StatusUnlocked {
+		return errors.New("job has wrong status")
+	}
 	var err error
 	j.f, err = os.OpenFile(j.path, os.O_RDWR, os.ModeExclusive)
 	j.s = StatusLocked
@@ -86,6 +91,9 @@ func (j *job) Bytes() (b []byte, err error) {
 	}
 
 	_, err = j.f.Read(b)
+	if err == io.EOF {
+		return b, nil
+	}
 	if err != nil {
 		j.s = StatusError
 		err = errors.Wrap(err, "file read failed")
@@ -115,6 +123,7 @@ func (j *job) Finish() error {
 	if newPath != "" {
 		err = os.Rename(j.path, newPath)
 	}
+	j.s = StatusFinished
 	if err != nil {
 		j.s = StatusError
 		j.errors = append(j.errors, err)

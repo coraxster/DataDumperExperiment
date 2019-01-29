@@ -12,7 +12,7 @@ import (
 
 type Connector interface {
 	IsAlive() bool
-	Channel() (*amqp.Channel, error)
+	Channel() (Channel, error)
 	SeedQueues([]string) error
 }
 
@@ -40,7 +40,7 @@ func Make(user, pass, host, port string, connNumber int) (Connector, error) {
 		}
 	}
 
-	log.Println("[INFO] rabbit connected: ", len(rabbitConn.conns))
+	log.Println("[INFO] rabbit connected:", len(rabbitConn.conns))
 
 	go rabbitConn.support()
 
@@ -97,7 +97,7 @@ func (connector *connector) support() {
 	}
 }
 
-func (connector *connector) Channel() (ch *amqp.Channel, err error) {
+func (connector *connector) Channel() (ch Channel, err error) {
 	var conn *amqp.Connection
 	rand.Seed(int64(time.Now().Nanosecond()))
 	connector.RLock()

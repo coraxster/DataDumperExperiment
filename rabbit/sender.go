@@ -4,6 +4,7 @@ import (
 	"github.com/coraxster/DataDumper/job"
 	"github.com/streadway/amqp"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -22,7 +23,6 @@ func (s *Sender) Process(jobs []job.Job) {
 	}
 
 	inCh := make(chan []job.Job)
-	doneCh := make(chan bool)
 	go func() {
 		for _, chunk := range chunks {
 			inCh <- chunk
@@ -30,18 +30,17 @@ func (s *Sender) Process(jobs []job.Job) {
 		close(inCh)
 	}()
 
+	wg := sync.WaitGroup{}
+	wg.Add(workersCount)
 	for i := workersCount; i > 0; i-- {
 		go func() {
 			for chunk := range inCh {
 				s.processChunk(chunk)
 			}
-			doneCh <- true
 		}()
 	}
 
-	for i := workersCount; i > 0; i-- {
-		<-doneCh
-	}
+	wg.Wait()
 }
 
 func (s *Sender) processChunk(jobs []job.Job) {
@@ -78,7 +77,7 @@ func (s *Sender) processChunk(jobs []job.Job) {
 	finish(jobs)
 }
 
-func send(ch *amqp.Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
+func send(ch Channel, jobs []job.Job, closeCh chan *amqp.Error) []job.Job {
 	sentJobs := make([]job.Job, 0, len(jobs))
 	for _, j := range jobs {
 		select {
