@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
+	"io"
 	"log"
 	"math/rand"
 	"sync"
@@ -14,6 +15,7 @@ type Connector interface {
 	IsAlive() bool
 	Channel() (Channel, error)
 	SeedQueues([]string) error
+	io.Closer
 }
 
 type connector struct {
@@ -143,4 +145,15 @@ func (connector *connector) SeedQueues(queues []string) error {
 		return err
 	}
 	return nil
+}
+
+func (connector *connector) Close() error {
+	var errs error = nil
+	for c := range connector.conns {
+		err := c.Close()
+		if err != nil {
+			errs = errors.Wrap(errs, err.Error())
+		}
+	}
+	return errs
 }

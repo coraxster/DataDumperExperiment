@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"github.com/coraxster/DataDumper/config"
 	"github.com/coraxster/DataDumper/job"
@@ -31,12 +32,11 @@ func main() {
 	err = rabbitConn.SeedQueues(conf.GetQueues())
 	exitOnError(err, "Seed rabbit queues failed.")
 
-	exit := make(chan os.Signal, 1)
-	signal.Notify(exit, os.Interrupt)
+	ctx := makeContext()
 
 	fini := make(chan bool)
 	go func() {
-		sendDirs(exit, rabbit.Sender{
+		sendDirs(ctx, rabbit.Sender{
 			Connector: rabbitConn,
 		})
 		fini <- true
@@ -47,14 +47,30 @@ func main() {
 	log.Println("[INFO] Service started.")
 
 	<-fini
+
+	err = rabbitConn.Close()
+	exitOnError(err, "Seed rabbit queues failed.")
 	log.Println("[INFO] See ya!")
 }
 
-func sendDirs(exit chan os.Signal, s rabbit.Sender) {
+func makeContext() context.Context {
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		cancel()
+		signal.Stop(c)
+	}()
+	return ctx
+}
+
+func sendDirs(ctx context.Context, s rabbit.Sender) {
 	ticker := time.Tick(time.Second)
 	for {
 		select {
-		case <-exit:
+		case <-ctx.Done():
 			return
 		case <-ticker:
 			if !s.IsAlive() {
@@ -67,7 +83,7 @@ func sendDirs(exit chan os.Signal, s rabbit.Sender) {
 				continue
 			}
 			log.Printf("[INFO] Got %v jobs.\n", len(jobs))
-			s.Process(jobs)
+			s.Process(ctx, jobs)
 			log.Printf("[INFO] Processed %v jobs for %v.\n", len(jobs), time.Since(start))
 		}
 	}

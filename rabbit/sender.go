@@ -1,6 +1,7 @@
 package rabbit
 
 import (
+	"context"
 	"github.com/coraxster/DataDumper/job"
 	"github.com/streadway/amqp"
 	"log"
@@ -14,7 +15,7 @@ type Sender struct {
 	Connector
 }
 
-func (s *Sender) Process(jobs []job.Job) {
+func (s *Sender) Process(ctx context.Context, jobs []job.Job) {
 	chunks := job.Split(jobs, 50)
 
 	workersCount := MaxParallel
@@ -24,20 +25,29 @@ func (s *Sender) Process(jobs []job.Job) {
 
 	inCh := make(chan []job.Job)
 	go func() {
+		defer close(inCh)
 		for _, chunk := range chunks {
-			inCh <- chunk
+			select {
+			case <-ctx.Done():
+				return
+			case inCh <- chunk:
+			}
 		}
-		close(inCh)
 	}()
 
 	wg := sync.WaitGroup{}
 	wg.Add(workersCount)
 	for i := workersCount; i > 0; i-- {
 		go func() {
+			defer wg.Done()
 			for chunk := range inCh {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 				s.processChunk(chunk)
 			}
-			wg.Done()
 		}()
 	}
 	wg.Wait()
