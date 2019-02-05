@@ -24,6 +24,7 @@ type connector struct {
 	close chan *amqp.Error
 	alive bool
 	sync.RWMutex
+	closed chan struct{}
 }
 
 func Make(user, pass, host, port string, connNumber int) (Connector, error) {
@@ -33,6 +34,7 @@ func Make(user, pass, host, port string, connNumber int) (Connector, error) {
 		make(chan *amqp.Error),
 		false,
 		sync.RWMutex{},
+		make(chan struct{}),
 	}
 
 	for i := 0; i < connNumber; i++ {
@@ -50,9 +52,13 @@ func Make(user, pass, host, port string, connNumber int) (Connector, error) {
 }
 
 func (connector *connector) IsAlive() bool {
+	select {
+	case <-connector.closed:
+		return false
+	default:
+	}
 	connector.RLock()
 	defer connector.RUnlock()
-
 	return len(connector.conns) > 0
 }
 
@@ -68,7 +74,12 @@ func (connector *connector) connect() error {
 	lost := conn.NotifyClose(make(chan *amqp.Error, 1))
 	go func() {
 		err := <-lost
-		log.Println("[ERROR] Connection failed. Error: ", err.Error())
+		select {
+		case <-connector.closed:
+			return
+		default:
+		}
+		log.Println("[ERROR] Connection failed. Error: ", err)
 		connector.Lock()
 		delete(connector.conns, conn)
 		connector.Unlock()
@@ -81,8 +92,13 @@ func (connector *connector) connect() error {
 func (connector *connector) support() {
 	for {
 		<-connector.close
-		log.Println("[INFO] Try to reconnect.")
 		for tries := 1; ; tries++ {
+			select {
+			case <-connector.closed:
+				return
+			default:
+			}
+			log.Println("[INFO] Try to reconnect.")
 			power := time.Duration(tries)
 			if tries > 30 {
 				power = time.Duration(60)
@@ -100,9 +116,12 @@ func (connector *connector) support() {
 }
 
 func (connector *connector) Channel() (ch Channel, err error) {
+	connector.RLock()
+	if !connector.IsAlive() {
+		return nil, errors.New("connector is not alive")
+	}
 	var conn *amqp.Connection
 	rand.Seed(int64(time.Now().Nanosecond()))
-	connector.RLock()
 	n := rand.Intn(len(connector.conns))
 	for conn = range connector.conns {
 		if n == 0 {
@@ -110,7 +129,6 @@ func (connector *connector) Channel() (ch Channel, err error) {
 		}
 		n--
 	}
-
 	connector.RUnlock()
 
 	ch, err = conn.Channel()
@@ -148,10 +166,14 @@ func (connector *connector) SeedQueues(queues []string) error {
 }
 
 func (connector *connector) Close() error {
+	connector.RLock()
+	defer connector.RUnlock()
+	close(connector.closed)
 	var errs error = nil
 	for c := range connector.conns {
 		err := c.Close()
 		if err != nil {
+			log.Println("[WARNING] error while closing:", err.Error())
 			errs = errors.Wrap(errs, err.Error())
 		}
 	}

@@ -21,7 +21,7 @@ type job struct {
 	f    *os.File
 }
 
-func MakeJob(path string, task *config.Task) Job {
+func MakeJob(path string, task *config.Task) *job {
 	return &job{
 		path: path,
 		t:    task,
@@ -50,7 +50,7 @@ func (j *job) Bytes() (b []byte, err error) {
 	}
 	b = make([]byte, stat.Size())
 	if stat.Size() == 0 {
-		return b, nil
+		return
 	}
 	_, err = j.f.Read(b)
 	if err == io.EOF {

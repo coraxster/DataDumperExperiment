@@ -49,7 +49,7 @@ func main() {
 	<-fini
 
 	err = rabbitConn.Close()
-	exitOnError(err, "Seed rabbit queues failed.")
+	exitOnError(err, "Closing rabbit failed.")
 	log.Println("[INFO] See ya!")
 }
 
