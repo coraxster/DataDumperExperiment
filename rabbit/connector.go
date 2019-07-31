@@ -116,10 +116,10 @@ func (connector *connector) support() {
 }
 
 func (connector *connector) Channel() (ch Channel, err error) {
-	connector.RLock()
 	if !connector.IsAlive() {
 		return nil, errors.New("connector is not alive")
 	}
+	connector.RLock()
 	var conn *amqp.Connection
 	rand.Seed(int64(time.Now().Nanosecond()))
 	n := rand.Intn(len(connector.conns))
